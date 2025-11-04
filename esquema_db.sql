@@ -1,51 +1,41 @@
-CREATE DATABASE IF NOT EXISTS pedido_envio_db;
-
 DROP SCHEMA IF EXISTS pedido_envio;
 CREATE SCHEMA pedido_envio;
 USE pedido_envio;
 
-DROP TABLE IF EXISTS PEDIDO;
-DROP TABLE IF EXISTS ENVIO;
+DROP TABLE IF EXISTS pedido;
+DROP TABLE IF EXISTS envio;
 
 USE pedido_envio;
 
-CREATE TABLE ENVIO (
-    id INT AUTO_INCREMENT PRIMARY KEY UNIQUE,
-    eliminado BOOL,
-    tracking VARCHAR(40),
-    empresa VARCHAR(10) NOT NULL,
-    tipo VARCHAR(8) NOT NULL DEFAULT 'Estandar',
+CREATE TABLE envio (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    eliminado BOOL DEFAULT FALSE NOT NULL,
+    tracking VARCHAR(40) UNIQUE,
+    empresa ENUM('ANDREANI', 'OCA', 'CORREO_ARG') NOT NULL,
+    tipo ENUM('ESTANDAR', 'EXPRES') NOT NULL DEFAULT 'ESTANDAR',
     costo DECIMAL(10,2) NOT NULL,
-    fecha_despacho DATETIME,
-    fecha_entrega DATETIME,
-    estado VARCHAR(15) NOT NULL DEFAULT 'En Preparacion',
-    CONSTRAINT uk_envio_tracking UNIQUE (tracking),
-    CONSTRAINT uk_envio_id UNIQUE (id),
-    CONSTRAINT chk_envio_estado CHECK (
-        estado IN ('En Preparacion', 'En Transito', 'Entregado')
-    ),
-    CONSTRAINT chk_envio_costo CHECK (costo >= 0),
-    CONSTRAINT chk_envio_fechas CHECK (fecha_entrega >= fecha_despacho)
+    fecha_despacho DATE,
+    fecha_estimada DATE,
+    estado ENUM ('EN_PREPARACION', 'EN_TRANSITO', 'ENTREGADO') NOT NULL DEFAULT 'EN_PREPARACION',
+    CONSTRAINT chk_envio_costo CHECK (costo >= 0)
 );
 
 
-CREATE TABLE PEDIDO (
-    id INT AUTO_INCREMENT PRIMARY KEY UNIQUE,
-    eliminado BOOL,
+CREATE TABLE pedido (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    eliminado BOOL DEFAULT FALSE NOT NULL,
     numero VARCHAR(20) NOT NULL,
-    fecha DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha DATE NOT NULL,
     cliente_nombre VARCHAR(120) NOT NULL,
     total DECIMAL(12,2) NOT NULL,
-    estado VARCHAR(10) NOT NULL DEFAULT 'Nuevo',
-    envio_id INT NOT NULL UNIQUE,
+    estado ENUM ('NUEVO', 'FACTURADO', 'ENVIADO') NOT NULL DEFAULT 'NUEVO',
+    envio_id BIGINT NULL,
     CONSTRAINT fk_pedido_envio FOREIGN KEY (envio_id) 
         REFERENCES ENVIO(id)
-        ON DELETE RESTRICT
-        ON UPDATE CASCADE,
+        ON DELETE SET NULL
+        ON UPDATE CASCADE,	
 	CONSTRAINT uk_pedido_numero UNIQUE (numero),
     CONSTRAINT uk_pedido_id UNIQUE (id),
-    CONSTRAINT chk_pedido_estado CHECK (
-        estado IN ('Nuevo', 'Facturado', 'Enviado')
-    ),
+    CONSTRAINT uk_pedido_envio_id UNIQUE (envio_id),
     CONSTRAINT chk_pedido_total CHECK (total >= 0)
 );
