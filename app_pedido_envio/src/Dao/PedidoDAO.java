@@ -1,7 +1,6 @@
 package Dao;
 
 import java.sql.*;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import Config.DatabaseConnection;
@@ -18,33 +17,35 @@ import Models.EstadoEnvio;
  * 
  * IMPORTANTE: Pedido tiene relación 1→1 con Envio.
  * Al leer un Pedido, se carga su Envio asociado mediante LEFT JOIN.
+ * 
+ * Base de datos: pedido_envio
  */
 public class PedidoDAO implements GenericDAO<Pedido> {
     
     private static final String INSERT_SQL = 
-        "INSERT INTO PEDIDO (numero, fecha, cliente_nombre, total, estado, envio_id, eliminado) " +
+        "INSERT INTO pedido (numero, fecha, cliente_nombre, total, estado, envio_id, eliminado) " +
         "VALUES (?, ?, ?, ?, ?, ?, FALSE)";
     
     private static final String UPDATE_SQL = 
-        "UPDATE PEDIDO SET numero = ?, fecha = ?, cliente_nombre = ?, " +
+        "UPDATE pedido SET numero = ?, fecha = ?, cliente_nombre = ?, " +
         "total = ?, estado = ?, envio_id = ? WHERE id = ?";
     
     private static final String DELETE_SQL = 
-        "UPDATE PEDIDO SET eliminado = TRUE WHERE id = ?";
+        "UPDATE pedido SET eliminado = TRUE WHERE id = ?";
     
     private static final String SELECT_BY_ID_SQL = 
-        "SELECT p.*, e.* FROM PEDIDO p " +
-        "LEFT JOIN ENVIO e ON p.envio_id = e.id " +
+        "SELECT p.*, e.* FROM pedido p " +
+        "LEFT JOIN envio e ON p.envio_id = e.id " +
         "WHERE p.id = ? AND p.eliminado = FALSE";
     
     private static final String SELECT_ALL_SQL = 
-        "SELECT p.*, e.* FROM PEDIDO p " +
-        "LEFT JOIN ENVIO e ON p.envio_id = e.id " +
+        "SELECT p.*, e.* FROM pedido p " +
+        "LEFT JOIN envio e ON p.envio_id = e.id " +
         "WHERE p.eliminado = FALSE";
     
     private static final String SELECT_BY_NUMERO_SQL = 
-        "SELECT p.*, e.* FROM PEDIDO p " +
-        "LEFT JOIN ENVIO e ON p.envio_id = e.id " +
+        "SELECT p.*, e.* FROM pedido p " +
+        "LEFT JOIN envio e ON p.envio_id = e.id " +
         "WHERE p.numero = ? AND p.eliminado = FALSE";
     
     @Override
@@ -80,9 +81,9 @@ public class PedidoDAO implements GenericDAO<Pedido> {
             
             // FK al envío (puede ser null)
             if (pedido.getEnvio() != null && pedido.getEnvio().getId() > 0) {
-                stmt.setInt(6, pedido.getEnvio().getId());
+                stmt.setLong(6, pedido.getEnvio().getId());
             } else {
-                stmt.setNull(6, Types.INTEGER);
+                stmt.setNull(6, Types.BIGINT);
             }
             
             stmt.setInt(7, pedido.getId());
@@ -171,9 +172,9 @@ public class PedidoDAO implements GenericDAO<Pedido> {
         
         // FK al envío (puede ser null)
         if (pedido.getEnvio() != null && pedido.getEnvio().getId() > 0) {
-            stmt.setInt(6, pedido.getEnvio().getId());
+            stmt.setLong(6, pedido.getEnvio().getId());
         } else {
-            stmt.setNull(6, Types.INTEGER);
+            stmt.setNull(6, Types.BIGINT);
         }
     }
     
@@ -193,49 +194,50 @@ public class PedidoDAO implements GenericDAO<Pedido> {
     /**
      * Mapea un ResultSet a un objeto Pedido CON su Envio asociado.
      * 
-     * Columnas del ResultSet (LEFT JOIN):
-     * - p.*: todos los campos de PEDIDO
-     * - e.*: todos los campos de ENVIO (pueden ser null)
+     * Orden de columnas del LEFT JOIN:
+     * PEDIDO: id, eliminado, numero, fecha, cliente_nombre, total, estado, envio_id
+     * ENVIO: id, eliminado, tracking, empresa, tipo, costo, fecha_despacho, fecha_estimada, estado
      */
     private Pedido mapearPedidoConEnvio(ResultSet rs) throws SQLException {
         Pedido pedido = new Pedido();
         
-        // Mapear campos de PEDIDO
-        pedido.setId(rs.getInt("p.id"));
-        pedido.setNumero(rs.getString("p.numero"));
+        // Mapear campos de PEDIDO (primeras 8 columnas)
+        pedido.setId(rs.getInt(1));           // p.id
+        pedido.setEliminado(rs.getBoolean(2)); // p.eliminado
+        pedido.setNumero(rs.getString(3));     // p.numero
         
-        Date fecha = rs.getDate("p.fecha");
+        Date fecha = rs.getDate(4);            // p.fecha
         if (fecha != null) {
             pedido.setFecha(fecha.toLocalDate());
         }
         
-        pedido.setClienteNombre(rs.getString("p.cliente_nombre"));
-        pedido.setTotal(rs.getDouble("p.total"));
-        pedido.setEstado(EstadoPedido.valueOf(rs.getString("p.estado")));
-        pedido.setEliminado(rs.getBoolean("p.eliminado"));
+        pedido.setClienteNombre(rs.getString(5)); // p.cliente_nombre
+        pedido.setTotal(rs.getDouble(6));         // p.total
+        pedido.setEstado(EstadoPedido.valueOf(rs.getString(7))); // p.estado
+        // Columna 8 es p.envio_id (no la necesitamos directamente)
         
-        // Mapear ENVIO asociado (puede ser null)
-        int envioId = rs.getInt("e.id");
-        if (envioId > 0) {  // Si hay envío asociado
+        // Mapear ENVIO asociado (columnas 9-17, pueden ser null si LEFT JOIN no encuentra match)
+        Long envioId = rs.getObject(9, Long.class); // e.id
+        if (envioId != null && envioId > 0) {
             Envio envio = new Envio();
-            envio.setId(envioId);
-            envio.setTracking(rs.getString("e.tracking"));
-            envio.setEmpresa(EmpresaEnvio.valueOf(rs.getString("e.empresa")));
-            envio.setTipo(TipoEnvio.valueOf(rs.getString("e.tipo")));
-            envio.setCosto(rs.getDouble("e.costo"));
+            envio.setId(envioId.intValue());           // e.id
+            envio.setEliminado(rs.getBoolean(10));     // e.eliminado
+            envio.setTracking(rs.getString(11));       // e.tracking
+            envio.setEmpresa(EmpresaEnvio.valueOf(rs.getString(12))); // e.empresa
+            envio.setTipo(TipoEnvio.valueOf(rs.getString(13)));       // e.tipo
+            envio.setCosto(rs.getDouble(14));          // e.costo
             
-            Date fechaDespacho = rs.getDate("e.fecha_despacho");
+            Date fechaDespacho = rs.getDate(15);       // e.fecha_despacho
             if (fechaDespacho != null) {
                 envio.setFechaDespacho(fechaDespacho.toLocalDate());
             }
             
-            Date fechaEstimada = rs.getDate("e.fecha_estimada");
+            Date fechaEstimada = rs.getDate(16);       // e.fecha_estimada
             if (fechaEstimada != null) {
                 envio.setFechaEstimada(fechaEstimada.toLocalDate());
             }
             
-            envio.setEstado(EstadoEnvio.valueOf(rs.getString("e.estado")));
-            envio.setEliminado(rs.getBoolean("e.eliminado"));
+            envio.setEstado(EstadoEnvio.valueOf(rs.getString(17))); // e.estado
             
             pedido.setEnvio(envio);  // ⬅️ Asociar el envío al pedido
         }
