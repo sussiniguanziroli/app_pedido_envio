@@ -5,312 +5,243 @@ import java.util.ArrayList;
 import java.util.List;
 import Config.DatabaseConnection;
 import Models.Pedido;
+import Models.Envio;
+import Models.EstadoPedido;
+import Models.EmpresaEnvio;
+import Models.TipoEnvio;
+import Models.EstadoEnvio;
 
 /**
- * Data Access Object para la entidad Domicilio.
- * Gestiona todas las operaciones de persistencia de domicilios en la base de datos.
- *
- * Características:
- * - Implementa GenericDAO<Domicilio> para operaciones CRUD estándar
- - Usa PreparedStatements en TODAS las consultas (protección contra SQL injection)
- - Implementa soft delete (eliminado=TRUE, no DELETE físico)
- - NO maneja relaciones (Pedido es entidad independiente)
- - Soporta transacciones mediante insertTx() (recibe Connection externa)
-
- Diferencias con PersonaDAO:
- - Más simple: NO tiene LEFT JOINs (Pedido no tiene relaciones cargadas)
- - NO tiene búsquedas especializadas (solo CRUD básico)
- - Todas las queries filtran por eliminado=FALSE (soft delete)
-
- Patrón: DAO con try-with-resources para manejo automático de recursos JDBC
+ * DAO para la entidad Pedido.
+ * Gestiona todas las operaciones CRUD de pedidos en la base de datos.
+ * 
+ * IMPORTANTE: Pedido tiene relación 1→1 con Envio.
+ * Al leer un Pedido, se carga su Envio asociado mediante LEFT JOIN.
+ * 
+ * Base de datos: pedido_envio
  */
 public class PedidoDAO implements GenericDAO<Pedido> {
-    /**
-     * Query de inserción de domicilio.
-     * Inserta calle y número.
-     * El id es AUTO_INCREMENT y se obtiene con RETURN_GENERATED_KEYS.
-     * El campo eliminado tiene DEFAULT FALSE en la BD.
-     */
-    private static final String INSERT_SQL = "INSERT INTO domicilios (calle, numero) VALUES (?, ?)";
-
-    /**
-     * Query de actualización de domicilio.
-     * Actualiza calle y número por id.
-     * NO actualiza el flag eliminado (solo se modifica en soft delete).
-     *
-     * ⚠️ IMPORTANTE: Si varias personas comparten este domicilio,
-     * la actualización los afectará a TODAS (RN-040).
-     */
-    private static final String UPDATE_SQL = "UPDATE domicilios SET calle = ?, numero = ? WHERE id = ?";
-
-    /**
-     * Query de soft delete.
-     * Marca eliminado=TRUE sin borrar físicamente la fila.
-     * Preserva integridad referencial y datos históricos.
-     *
-     * ⚠️ PELIGRO: Este método NO verifica si hay personas asociadas.
-     * Puede dejar FKs huérfanas (personas.domicilio_id apuntando a domicilio eliminado).
-     * ALTERNATIVA SEGURA: PersonaServiceImpl.eliminarDomicilioDePersona()
-     */
-    private static final String DELETE_SQL = "UPDATE domicilios SET eliminado = TRUE WHERE id = ?";
-
-    /**
-     * Query para obtener domicilio por ID.
-     * Solo retorna domicilios activos (eliminado=FALSE).
-     * SELECT * es aceptable aquí porque Domicilio tiene solo 4 columnas.
-     */
-    private static final String SELECT_BY_ID_SQL = "SELECT * FROM domicilios WHERE id = ? AND eliminado = FALSE";
-
-    /**
-     * Query para obtener todos los domicilios activos.
-     * Filtra por eliminado=FALSE (solo domicilios activos).
-     * SELECT * es aceptable aquí porque Domicilio tiene solo 4 columnas.
-     */
-    private static final String SELECT_ALL_SQL = "SELECT * FROM domicilios WHERE eliminado = FALSE";
-
-    /**
-     * Inserta un domicilio en la base de datos (versión sin transacción).
-     * Crea su propia conexión y la cierra automáticamente.
-     *
-     * Flujo:
-     * 1. Abre conexión con DatabaseConnection.getConnection()
-     * 2. Crea PreparedStatement con INSERT_SQL y RETURN_GENERATED_KEYS
-     * 3. Setea parámetros (calle, numero)
-     * 4. Ejecuta INSERT
-     * 5. Obtiene el ID autogenerado y lo asigna a domicilio.id
-     * 6. Cierra recursos automáticamente (try-with-resources)
-     *
-     * IMPORTANTE: El ID generado se asigna al objeto domicilio.
-     * Esto permite que PersonaServiceImpl.insertar() use domicilio.getId()
-     * inmediatamente después de insertar.
-     *
-     * @param domicilio Pedido a insertar (id será ignorado y regenerado)
-     * @throws SQLException Si falla la inserción o no se obtiene ID generado
-     */
+    
+    private static final String INSERT_SQL = 
+        "INSERT INTO pedido (numero, fecha, cliente_nombre, total, estado, envio_id, eliminado) " +
+        "VALUES (?, ?, ?, ?, ?, ?, FALSE)";
+    
+    private static final String UPDATE_SQL = 
+        "UPDATE pedido SET numero = ?, fecha = ?, cliente_nombre = ?, " +
+        "total = ?, estado = ?, envio_id = ? WHERE id = ?";
+    
+    private static final String DELETE_SQL = 
+        "UPDATE pedido SET eliminado = TRUE WHERE id = ?";
+    
+    private static final String SELECT_BY_ID_SQL = 
+        "SELECT p.*, e.* FROM pedido p " +
+        "LEFT JOIN envio e ON p.envio_id = e.id " +
+        "WHERE p.id = ? AND p.eliminado = FALSE";
+    
+    private static final String SELECT_ALL_SQL = 
+        "SELECT p.*, e.* FROM pedido p " +
+        "LEFT JOIN envio e ON p.envio_id = e.id " +
+        "WHERE p.eliminado = FALSE";
+    
+    private static final String SELECT_BY_NUMERO_SQL = 
+        "SELECT p.*, e.* FROM pedido p " +
+        "LEFT JOIN envio e ON p.envio_id = e.id " +
+        "WHERE p.numero = ? AND p.eliminado = FALSE";
+    
     @Override
-    public void insertar(Pedido domicilio) throws SQLException {
+    public void insertar(Pedido pedido) throws Exception {
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(INSERT_SQL, Statement.RETURN_GENERATED_KEYS)) {
-
-            setDomicilioParameters(stmt, domicilio);
+            
+            setPedidoParameters(stmt, pedido);
             stmt.executeUpdate();
-
-            setGeneratedId(stmt, domicilio);
+            setGeneratedId(stmt, pedido);
         }
     }
-
-    /**
-     * Inserta un domicilio dentro de una transacción existente.
-     * NO crea nueva conexión, recibe una Connection externa.
-     * NO cierra la conexión (responsabilidad del caller con TransactionManager).
-     *
-     * Usado por: (Actualmente no usado, pero disponible para transacciones futuras)
-     * - Operaciones que requieren múltiples inserts coordinados
-     * - Rollback automático si alguna operación falla
-     *
-     * @param domicilio Pedido a insertar
-     * @param conn Conexión transaccional (NO se cierra en este método)
-     * @throws Exception Si falla la inserción
-     */
+    
     @Override
-    public void insertTx(Pedido domicilio, Connection conn) throws Exception {
+    public void insertTx(Pedido pedido, Connection conn) throws Exception {
         try (PreparedStatement stmt = conn.prepareStatement(INSERT_SQL, Statement.RETURN_GENERATED_KEYS)) {
-            setDomicilioParameters(stmt, domicilio);
+            setPedidoParameters(stmt, pedido);
             stmt.executeUpdate();
-            setGeneratedId(stmt, domicilio);
+            setGeneratedId(stmt, pedido);
         }
     }
-
-    /**
-     * Actualiza un domicilio existente en la base de datos.
-     * Actualiza calle y número.
-     *
-     * Validaciones:
-     * - Si rowsAffected == 0 → El domicilio no existe o ya está eliminado
-     *
-     * ⚠️ IMPORTANTE: Si varias personas comparten este domicilio,
-     * la actualización los afectará a TODAS (RN-040).
-     * Ejemplo:
-     * - Domicilio ID=1 "Av. Siempreviva 742" tiene 3 personas asociadas
-     * - actualizar(domicilio con calle="Calle Nueva") cambia la dirección de las 3 personas
-     *
-     * Esto es CORRECTO: permite que familias compartan la misma dirección
-     * y se actualice en un solo lugar.
-     *
-     * @param domicilio Pedido con los datos actualizados (id debe ser > 0)
-     * @throws SQLException Si el domicilio no existe o hay error de BD
-     */
+    
     @Override
-    public void actualizar(Pedido domicilio) throws SQLException {
+    public void actualizar(Pedido pedido) throws Exception {
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(UPDATE_SQL)) {
-
-            stmt.setString(1, domicilio.getCalle());
-            stmt.setString(2, domicilio.getNumero());
-            stmt.setInt(3, domicilio.getId());
-
+            
+            stmt.setString(1, pedido.getNumero());
+            stmt.setDate(2, pedido.getFecha() != null ? Date.valueOf(pedido.getFecha()) : null);
+            stmt.setString(3, pedido.getClienteNombre());
+            stmt.setDouble(4, pedido.getTotal());
+            stmt.setString(5, pedido.getEstado().name());
+            
+            // FK al envío (puede ser null)
+            if (pedido.getEnvio() != null && pedido.getEnvio().getId() > 0) {
+                stmt.setLong(6, pedido.getEnvio().getId());
+            } else {
+                stmt.setNull(6, Types.BIGINT);
+            }
+            
+            stmt.setInt(7, pedido.getId());
+            
             int rowsAffected = stmt.executeUpdate();
             if (rowsAffected == 0) {
-                throw new SQLException("No se pudo actualizar el domicilio con ID: " + domicilio.getId());
+                throw new SQLException("No se pudo actualizar el pedido con ID: " + pedido.getId());
             }
         }
     }
-
-    /**
-     * Elimina lógicamente un domicilio (soft delete).
-     * Marca eliminado=TRUE sin borrar físicamente la fila.
-     *
-     * Validaciones:
-     * - Si rowsAffected == 0 → El domicilio no existe o ya está eliminado
-     *
-     * ⚠️ PELIGRO: Este método NO verifica si hay personas asociadas (RN-029).
-     * Si hay personas con personas.domicilio_id apuntando a este domicilio,
-     * quedarán con FK huérfana (apuntando a un domicilio eliminado).
-     *
-     * Esto puede causar:
-     * - Datos inconsistentes (persona asociada a domicilio "eliminado")
-     * - Errores en LEFT JOINs que esperan domicilios activos
-     *
-     * ALTERNATIVA SEGURA: PersonaServiceImpl.eliminarDomicilioDePersona()
-     * - Primero actualiza persona.domicilio_id = NULL
-     * - Luego elimina el domicilio
-     * - Garantiza que no queden FKs huérfanas
-     *
-     * Este método se mantiene para casos donde:
-     * - Se está seguro de que el domicilio NO tiene personas asociadas
-     * - Se quiere eliminar domicilios en lote (administración)
-     *
-     * @param id ID del domicilio a eliminar
-     * @throws SQLException Si el domicilio no existe o hay error de BD
-     */
+    
     @Override
-    public void eliminar(int id) throws SQLException {
+    public void eliminar(int id) throws Exception {
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(DELETE_SQL)) {
-
+            
             stmt.setInt(1, id);
             int rowsAffected = stmt.executeUpdate();
-
+            
             if (rowsAffected == 0) {
-                throw new SQLException("No se encontró domicilio con ID: " + id);
+                throw new SQLException("No se encontró pedido con ID: " + id);
             }
         }
     }
-
-    /**
-     * Obtiene un domicilio por su ID.
-     * Solo retorna domicilios activos (eliminado=FALSE).
-     *
-     * @param id ID del domicilio a buscar
-     * @return Pedido encontrado, o null si no existe o está eliminado
-     * @throws SQLException Si hay error de BD
-     */
+    
     @Override
-    public Pedido getById(int id) throws SQLException {
+    public Pedido getById(int id) throws Exception {
         try (Connection conn = DatabaseConnection.getConnection();
              PreparedStatement stmt = conn.prepareStatement(SELECT_BY_ID_SQL)) {
-
+            
             stmt.setInt(1, id);
-
+            
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
-                    return mapResultSetToDomicilio(rs);
+                    return mapearPedidoConEnvio(rs);
                 }
             }
         }
         return null;
     }
-
-    /**
-     * Obtiene todos los domicilios activos (eliminado=FALSE).
-     *
-     * Nota: Usa Statement (no PreparedStatement) porque no hay parámetros.
-     *
-     * Uso típico:
-     * - MenuHandler opción 7: Listar domicilios existentes para asignar a persona
-     *
-     * @return Lista de domicilios activos (puede estar vacía)
-     * @throws SQLException Si hay error de BD
-     */
+    
     @Override
-    public List<Pedido> getAll() throws SQLException {
-        List<Pedido> domicilios = new ArrayList<>();
-
+    public List<Pedido> getAll() throws Exception {
+        List<Pedido> pedidos = new ArrayList<>();
+        
         try (Connection conn = DatabaseConnection.getConnection();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(SELECT_ALL_SQL)) {
-
+            
             while (rs.next()) {
-                domicilios.add(mapResultSetToDomicilio(rs));
+                pedidos.add(mapearPedidoConEnvio(rs));
             }
         }
-
-        return domicilios;
+        
+        return pedidos;
     }
-
+    
     /**
-     * Setea los parámetros de domicilio en un PreparedStatement.
-     * Método auxiliar usado por insertar() e insertTx().
-     *
-     * Parámetros seteados:
-     * 1. calle (String)
-     * 2. numero (String)
-     *
-     * @param stmt PreparedStatement con INSERT_SQL
-     * @param domicilio Pedido con los datos a insertar
-     * @throws SQLException Si hay error al setear parámetros
+     * Busca un pedido por su número (campo UNIQUE).
+     * Incluye el envío asociado mediante LEFT JOIN.
      */
-    private void setDomicilioParameters(PreparedStatement stmt, Pedido domicilio) throws SQLException {
-        stmt.setString(1, domicilio.getCalle());
-        stmt.setString(2, domicilio.getNumero());
+    public Pedido buscarPorNumero(String numero) throws Exception {
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(SELECT_BY_NUMERO_SQL)) {
+            
+            stmt.setString(1, numero);
+            
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return mapearPedidoConEnvio(rs);
+                }
+            }
+        }
+        return null;
     }
-
+    
     /**
-     * Obtiene el ID autogenerado por la BD después de un INSERT.
-     * Asigna el ID generado al objeto domicilio.
-     *
-     * IMPORTANTE: Este método es crítico para mantener la consistencia:
-     * - Después de insertar, el objeto domicilio debe tener su ID real de la BD
-     * - PersonaServiceImpl.insertar() depende de esto para setear la FK:
-     *   1. domicilioService.insertar(domicilio) → domicilio.id se setea aquí
-     *   2. personaDAO.insertar(persona) → usa persona.getDomicilio().getId() para la FK
-     * - Necesario para operaciones transaccionales que requieren el ID generado
-     *
-     * @param stmt PreparedStatement que ejecutó el INSERT con RETURN_GENERATED_KEYS
-     * @param domicilio Objeto domicilio a actualizar con el ID generado
-     * @throws SQLException Si no se pudo obtener el ID generado (indica problema grave)
+     * Setea los parámetros de un pedido en el PreparedStatement.
      */
-    private void setGeneratedId(PreparedStatement stmt, Pedido domicilio) throws SQLException {
+    private void setPedidoParameters(PreparedStatement stmt, Pedido pedido) throws SQLException {
+        stmt.setString(1, pedido.getNumero());
+        stmt.setDate(2, pedido.getFecha() != null ? Date.valueOf(pedido.getFecha()) : null);
+        stmt.setString(3, pedido.getClienteNombre());
+        stmt.setDouble(4, pedido.getTotal());
+        stmt.setString(5, pedido.getEstado().name());
+        
+        // FK al envío (puede ser null)
+        if (pedido.getEnvio() != null && pedido.getEnvio().getId() > 0) {
+            stmt.setLong(6, pedido.getEnvio().getId());
+        } else {
+            stmt.setNull(6, Types.BIGINT);
+        }
+    }
+    
+    /**
+     * Obtiene el ID autogenerado y lo asigna al pedido.
+     */
+    private void setGeneratedId(PreparedStatement stmt, Pedido pedido) throws SQLException {
         try (ResultSet generatedKeys = stmt.getGeneratedKeys()) {
             if (generatedKeys.next()) {
-                domicilio.setId(generatedKeys.getInt(1));
+                pedido.setId(generatedKeys.getInt(1));
             } else {
-                throw new SQLException("La inserción del domicilio falló, no se obtuvo ID generado");
+                throw new SQLException("La inserción del pedido falló, no se obtuvo ID generado");
             }
         }
     }
-
+    
     /**
-     * Mapea un ResultSet a un objeto Domicilio.
-     * Reconstruye el objeto usando el constructor completo.
-     *
-     * Mapeo de columnas:
-     * - id → id
-     * - calle → calle
-     * - numero → numero
-     *
-     * Nota: El campo eliminado NO se mapea porque las queries filtran por eliminado=FALSE,
-     * garantizando que solo se retornan domicilios activos.
-     *
-     * @param rs ResultSet posicionado en una fila con datos de domicilio
-     * @return Pedido reconstruido
-     * @throws SQLException Si hay error al leer columnas del ResultSet
+     * Mapea un ResultSet a un objeto Pedido CON su Envio asociado.
+     * 
+     * Orden de columnas del LEFT JOIN:
+     * PEDIDO: id, eliminado, numero, fecha, cliente_nombre, total, estado, envio_id
+     * ENVIO: id, eliminado, tracking, empresa, tipo, costo, fecha_despacho, fecha_estimada, estado
      */
-    private Pedido mapResultSetToDomicilio(ResultSet rs) throws SQLException {
-        return new Pedido(
-            rs.getInt("id"),
-            rs.getString("calle"),
-            rs.getString("numero")
-        );
+    private Pedido mapearPedidoConEnvio(ResultSet rs) throws SQLException {
+        Pedido pedido = new Pedido();
+        
+        // Mapear campos de PEDIDO (primeras 8 columnas)
+        pedido.setId(rs.getInt(1));           // p.id
+        pedido.setEliminado(rs.getBoolean(2)); // p.eliminado
+        pedido.setNumero(rs.getString(3));     // p.numero
+        
+        Date fecha = rs.getDate(4);            // p.fecha
+        if (fecha != null) {
+            pedido.setFecha(fecha.toLocalDate());
+        }
+        
+        pedido.setClienteNombre(rs.getString(5)); // p.cliente_nombre
+        pedido.setTotal(rs.getDouble(6));         // p.total
+        pedido.setEstado(EstadoPedido.valueOf(rs.getString(7))); // p.estado
+        // Columna 8 es p.envio_id (no la necesitamos directamente)
+        
+        // Mapear ENVIO asociado (columnas 9-17, pueden ser null si LEFT JOIN no encuentra match)
+        Long envioId = rs.getObject(9, Long.class); // e.id
+        if (envioId != null && envioId > 0) {
+            Envio envio = new Envio();
+            envio.setId(envioId.intValue());           // e.id
+            envio.setEliminado(rs.getBoolean(10));     // e.eliminado
+            envio.setTracking(rs.getString(11));       // e.tracking
+            envio.setEmpresa(EmpresaEnvio.valueOf(rs.getString(12))); // e.empresa
+            envio.setTipo(TipoEnvio.valueOf(rs.getString(13)));       // e.tipo
+            envio.setCosto(rs.getDouble(14));          // e.costo
+            
+            Date fechaDespacho = rs.getDate(15);       // e.fecha_despacho
+            if (fechaDespacho != null) {
+                envio.setFechaDespacho(fechaDespacho.toLocalDate());
+            }
+            
+            Date fechaEstimada = rs.getDate(16);       // e.fecha_estimada
+            if (fechaEstimada != null) {
+                envio.setFechaEstimada(fechaEstimada.toLocalDate());
+            }
+            
+            envio.setEstado(EstadoEnvio.valueOf(rs.getString(17))); // e.estado
+            
+            pedido.setEnvio(envio);  // ⬅️ Asociar el envío al pedido
+        }
+        
+        return pedido;
     }
 }

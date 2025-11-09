@@ -1,148 +1,208 @@
 package Service;
 
+import java.sql.Connection;
 import java.util.List;
-import Dao.GenericDAO;
+import Config.DatabaseConnection;
+import Config.TransactionManager;
+import Dao.PedidoDAO;
 import Models.Pedido;
 
 /**
- * Implementación del servicio de negocio para la entidad Domicilio.
- * Capa intermedia entre la UI y el DAO que aplica validaciones de negocio.
- *
- * Responsabilidades:
- * - Validar que los datos del domicilio sean correctos ANTES de persistir
- * - Aplicar reglas de negocio (RN-023: calle y número obligatorios)
- * - Delegar operaciones de BD al DAO
- * - Transformar excepciones técnicas en errores de negocio comprensibles
- *
- * Patrón: Service Layer con inyección de dependencias
+ * Servicio de negocio para la entidad Pedido.
+ * Aplica validaciones y coordina operaciones con Envio.
+ * 
+ * IMPORTANTE: Este servicio coordina la creación transaccional de:
+ * 1. Envio (primero, para obtener su ID)
+ * 2. Pedido (después, usando el envio_id)
  */
 public class PedidoServiceImpl implements GenericService<Pedido> {
-    /**
-     * DAO para acceso a datos de domicilios.
-     * Inyectado en el constructor (Dependency Injection).
-     * Usa GenericDAO para permitir testing con mocks.
-     */
-    private final GenericDAO<Pedido> domicilioDAO;
-
-    /**
-     * Constructor con inyección de dependencias.
-     * Valida que el DAO no sea null (fail-fast).
-     *
-     * @param domicilioDAO DAO de domicilios (normalmente DomicilioDAO)
-     * @throws IllegalArgumentException si domicilioDAO es null
-     */
-    public PedidoServiceImpl(GenericDAO<Pedido> domicilioDAO) {
-        if (domicilioDAO == null) {
-            throw new IllegalArgumentException("DomicilioDAO no puede ser null");
+    private final PedidoDAO pedidoDAO;
+    private final EnvioServiceImpl envioService;
+    
+    public PedidoServiceImpl(PedidoDAO pedidoDAO, EnvioServiceImpl envioService) {
+        if (pedidoDAO == null) {
+            throw new IllegalArgumentException("PedidoDAO no puede ser null");
         }
-        this.domicilioDAO = domicilioDAO;
+        if (envioService == null) {
+            throw new IllegalArgumentException("EnvioService no puede ser null");
+        }
+        this.pedidoDAO = pedidoDAO;
+        this.envioService = envioService;
     }
-
+    
     /**
-     * Inserta un nuevo domicilio en la base de datos.
-     *
-     * Flujo:
-     * 1. Valida que calle y número no estén vacíos
-     * 2. Delega al DAO para insertar
-     * 3. El DAO asigna el ID autogenerado al objeto domicilio
-     *
-     * @param domicilio Pedido a insertar (id será ignorado y regenerado)
-     * @throws Exception Si la validación falla o hay error de BD
+     * Inserta un pedido nuevo en la BD.
+     * Si el pedido tiene envío asociado, lo crea primero.
      */
     @Override
-    public void insertar(Pedido domicilio) throws Exception {
-        validateDomicilio(domicilio);
-        domicilioDAO.insertar(domicilio);
-    }
-
-    /**
-     * Actualiza un domicilio existente en la base de datos.
-     *
-     * Validaciones:
-     * - El domicilio debe tener datos válidos (calle, número)
-     * - El ID debe ser > 0 (debe ser un domicilio ya persistido)
-     *
-     * IMPORTANTE: Si varias personas comparten este domicilio,
-     * la actualización los afectará a TODAS (RN-040).
-     *
-     * @param domicilio Pedido con los datos actualizados
-     * @throws Exception Si la validación falla o el domicilio no existe
-     */
-    @Override
-    public void actualizar(Pedido domicilio) throws Exception {
-        validateDomicilio(domicilio);
-        if (domicilio.getId() <= 0) {
-            throw new IllegalArgumentException("El ID del domicilio debe ser mayor a 0 para actualizar");
+    public void insertar(Pedido pedido) throws Exception {
+        validatePedido(pedido);
+        validateNumeroUnique(pedido.getNumero(), null);
+        
+        // Si tiene envío, insertarlo primero para obtener su ID
+        if (pedido.getEnvio() != null) {
+            if (pedido.getEnvio().getId() == 0) {
+                // Envío nuevo: insertar primero
+                envioService.insertar(pedido.getEnvio());
+            } else {
+                // Envío existente: actualizar
+                envioService.actualizar(pedido.getEnvio());
+            }
         }
-        domicilioDAO.actualizar(domicilio);
+        
+        pedidoDAO.insertar(pedido);
     }
-
+    
     /**
-     * Elimina lógicamente un domicilio (soft delete).
-     * Marca el domicilio como eliminado=TRUE sin borrarlo físicamente.
-     *
-     * ⚠️ ADVERTENCIA: Este método NO verifica si hay personas asociadas.
-     * Puede dejar referencias huérfanas en personas.domicilio_id (RN-029).
-     *
-     * ALTERNATIVA SEGURA: Usar PersonaServiceImpl.eliminarDomicilioDePersona()
-     * que actualiza la FK antes de eliminar (opción 10 del menú).
-     *
-     * @param id ID del domicilio a eliminar
-     * @throws Exception Si id <= 0 o no existe el domicilio
+     * Crea un pedido con su envío en una TRANSACCIÓN.
+     * Si algo falla, hace rollback de todo.
+     * 
+     * Este es el método RECOMENDADO para crear pedidos con envío.
      */
+    public void crearPedidoConEnvio(Pedido pedido) throws Exception {
+        validatePedido(pedido);
+        validateNumeroUnique(pedido.getNumero(), null);
+        
+        if (pedido.getEnvio() == null) {
+            throw new IllegalArgumentException("El pedido debe tener un envío asociado");
+        }
+        
+        Connection conn = null;
+        try {
+            conn = DatabaseConnection.getConnection();
+            TransactionManager tm = new TransactionManager(conn);
+            tm.startTransaction();
+            
+            try {
+                // 1. Crear el envío primero
+                envioService.insertarTx(pedido.getEnvio(), conn);
+                
+                // 2. Crear el pedido (ya tiene envio_id)
+                pedidoDAO.insertTx(pedido, conn);
+                
+                // 3. Todo OK → commit
+                tm.commit();
+                
+            } catch (Exception e) {
+                tm.rollback();
+                throw new Exception("Error en transacción: " + e.getMessage(), e);
+            } finally {
+                tm.close();
+            }
+            
+        } finally {
+            if (conn != null && !conn.isClosed()) {
+                conn.close();
+            }
+        }
+    }
+    
+    @Override
+    public void actualizar(Pedido pedido) throws Exception {
+        validatePedido(pedido);
+        if (pedido.getId() <= 0) {
+            throw new IllegalArgumentException("El ID del pedido debe ser mayor a 0 para actualizar");
+        }
+        validateNumeroUnique(pedido.getNumero(), pedido.getId());
+        
+        // Si cambió el envío, actualizarlo también
+        if (pedido.getEnvio() != null && pedido.getEnvio().getId() > 0) {
+            envioService.actualizar(pedido.getEnvio());
+        }
+        
+        pedidoDAO.actualizar(pedido);
+    }
+    
     @Override
     public void eliminar(int id) throws Exception {
         if (id <= 0) {
             throw new IllegalArgumentException("El ID debe ser mayor a 0");
         }
-        domicilioDAO.eliminar(id);
+        
+        // Obtener el pedido para ver si tiene envío
+        Pedido pedido = pedidoDAO.getById(id);
+        if (pedido == null) {
+            throw new IllegalArgumentException("Pedido no encontrado con ID: " + id);
+        }
+        
+        // Eliminar el pedido (soft delete)
+        pedidoDAO.eliminar(id);
+        
+        // OPCIONAL: También eliminar el envío asociado
+        // if (pedido.getEnvio() != null) {
+        //     envioService.eliminar(pedido.getEnvio().getId());
+        // }
     }
-
-    /**
-     * Obtiene un domicilio por su ID.
-     *
-     * @param id ID del domicilio a buscar
-     * @return Pedido encontrado, o null si no existe o está eliminado
-     * @throws Exception Si id <= 0 o hay error de BD
-     */
+    
     @Override
     public Pedido getById(int id) throws Exception {
         if (id <= 0) {
             throw new IllegalArgumentException("El ID debe ser mayor a 0");
         }
-        return domicilioDAO.getById(id);
+        return pedidoDAO.getById(id);
     }
-
-    /**
-     * Obtiene todos los domicilios activos (eliminado=FALSE).
-     *
-     * @return Lista de domicilios activos (puede estar vacía)
-     * @throws Exception Si hay error de BD
-     */
+    
     @Override
     public List<Pedido> getAll() throws Exception {
-        return domicilioDAO.getAll();
+        return pedidoDAO.getAll();
     }
-
+    
     /**
-     * Valida que un domicilio tenga datos correctos.
-     *
-     * Reglas de negocio aplicadas:
-     * - RN-023: Calle y número son obligatorios
-     * - RN-024: Se verifica trim() para evitar strings solo con espacios
-     *
-     * @param domicilio Pedido a validar
-     * @throws IllegalArgumentException Si alguna validación falla
+     * Busca un pedido por su número (campo único).
      */
-    private void validateDomicilio(Pedido domicilio) {
-        if (domicilio == null) {
-            throw new IllegalArgumentException("El domicilio no puede ser null");
+    public Pedido buscarPorNumero(String numero) throws Exception {
+        if (numero == null || numero.trim().isEmpty()) {
+            throw new IllegalArgumentException("El número de pedido no puede estar vacío");
         }
-        if (domicilio.getCalle() == null || domicilio.getCalle().trim().isEmpty()) {
-            throw new IllegalArgumentException("La calle no puede estar vacía");
+        return pedidoDAO.buscarPorNumero(numero);
+    }
+    
+    /**
+     * Expone el servicio de envíos para que el menú pueda usarlo.
+     */
+    public EnvioServiceImpl getEnvioService() {
+        return this.envioService;
+    }
+    
+    /**
+     * Valida que un pedido tenga datos correctos.
+     * 
+     * Reglas de negocio:
+     * - Número, fecha, cliente y total son obligatorios
+     * - Total debe ser >= 0
+     * - Estado es obligatorio
+     */
+    private void validatePedido(Pedido pedido) {
+        if (pedido == null) {
+            throw new IllegalArgumentException("El pedido no puede ser null");
         }
-        if (domicilio.getNumero() == null || domicilio.getNumero().trim().isEmpty()) {
-            throw new IllegalArgumentException("El número no puede estar vacío");
+        if (pedido.getNumero() == null || pedido.getNumero().trim().isEmpty()) {
+            throw new IllegalArgumentException("El número de pedido no puede estar vacío");
+        }
+        if (pedido.getFecha() == null) {
+            throw new IllegalArgumentException("La fecha no puede ser null");
+        }
+        if (pedido.getClienteNombre() == null || pedido.getClienteNombre().trim().isEmpty()) {
+            throw new IllegalArgumentException("El nombre del cliente no puede estar vacío");
+        }
+        if (pedido.getTotal() == null || pedido.getTotal() < 0) {
+            throw new IllegalArgumentException("El total debe ser mayor o igual a 0");
+        }
+        if (pedido.getEstado() == null) {
+            throw new IllegalArgumentException("El estado es obligatorio");
+        }
+    }
+    
+    /**
+     * Valida que el número de pedido sea único.
+     * Similar a la validación de DNI en PersonaService.
+     */
+    private void validateNumeroUnique(String numero, Integer pedidoId) throws Exception {
+        Pedido existente = pedidoDAO.buscarPorNumero(numero);
+        if (existente != null) {
+            if (pedidoId == null || existente.getId() != pedidoId) {
+                throw new IllegalArgumentException("Ya existe un pedido con el número: " + numero);
+            }
         }
     }
 }

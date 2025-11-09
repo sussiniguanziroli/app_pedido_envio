@@ -1,136 +1,88 @@
 package Models;
 
+import java.time.LocalDate;
 import java.util.Objects;
 
 /**
- * Entidad que representa un domicilio (dirección) en el sistema.
- * Hereda de Base para obtener id y eliminado.
- *
- * Relación con Persona:
- * - Una Persona puede tener 0 o 1 Domicilio
- * - Un Domicilio puede estar asociado a múltiples Personas (relación N:1 desde Persona)
- *
- * Tabla BD: domicilios
- * Campos:
- * - id: INT AUTO_INCREMENT PRIMARY KEY (heredado de Base)
- * - calle: VARCHAR(100) NOT NULL
- * - numero: VARCHAR(10) NOT NULL
- * - eliminado: BOOLEAN DEFAULT FALSE (heredado de Base)
+ * Entidad Pedido (Clase A en la relación 1→1).
+ * Representa un pedido de cliente con su envío asociado.
+ * 
+ * RELACIÓN 1→1 UNIDIRECCIONAL:
+ * - Pedido CONOCE a Envio (tiene atributo private Envio envio)
+ * - Envio NO conoce a Pedido
  */
 public class Pedido extends Base {
-    /**
-     * Nombre de la calle.
-     * Requerido, no puede ser null ni estar vacío.
-     */
-    private String calle;
-
-    /**
-     * Número de la dirección.
-     * Puede incluir letras (ej: "123A", "S/N").
-     * Requerido, no puede ser null ni estar vacío.
-     */
     private String numero;
-
-    /**
-     * Constructor completo para reconstruir un Domicilio desde la base de datos.
-     * Usado por PersonaDAO y DomicilioDAO al mapear ResultSet.
-     *
-     * @param id ID del domicilio en la BD
-     * @param calle Nombre de la calle
-     * @param numero Número de la dirección
-     */
-    public Pedido(int id, String calle, String numero) {
-        super(id, false); // Llama al constructor de Base con eliminado=false
-        this.calle = calle;
-        this.numero = numero;
-    }
-
-    /**
-     * Constructor por defecto para crear un domicilio nuevo.
-     * El ID será asignado por la BD al insertar.
-     * El flag eliminado se inicializa en false por Base.
-     */
+    private LocalDate fecha;
+    private String clienteNombre;
+    private Double total;
+    private EstadoPedido estado;
+    
+    // ⭐ LA RELACIÓN 1→1 UNIDIRECCIONAL
+    private Envio envio;
+    
+    // Constructor vacío (OBLIGATORIO)
     public Pedido() {
         super();
     }
-
-    /**
-     * Obtiene el nombre de la calle.
-     * @return Nombre de la calle
-     */
-    public String getCalle() {
-        return calle;
-    }
-
-    /**
-     * Establece el nombre de la calle.
-     * Validación: DomicilioServiceImpl verifica que no esté vacío.
-     *
-     * @param calle Nuevo nombre de la calle
-     */
-    public void setCalle(String calle) {
-        this.calle = calle;
-    }
-
-    /**
-     * Obtiene el número de la dirección.
-     * @return Número de la dirección
-     */
-    public String getNumero() {
-        return numero;
-    }
-
-    /**
-     * Establece el número de la dirección.
-     * Validación: DomicilioServiceImpl verifica que no esté vacío.
-     *
-     * @param numero Nuevo número
-     */
-    public void setNumero(String numero) {
+    
+    // Constructor completo para reconstruir desde BD
+    public Pedido(int id, String numero, LocalDate fecha, 
+                  String clienteNombre, Double total, EstadoPedido estado) {
+        super(id, false);
         this.numero = numero;
+        this.fecha = fecha;
+        this.clienteNombre = clienteNombre;
+        this.total = total;
+        this.estado = estado;
     }
-
-    /**
-     * Representación en texto del domicilio.
-     * Útil para debugging y logging.
-     *
-     * @return String con todos los campos del domicilio
-     */
+    
+    // Getters y Setters (TODOS)
+    public String getNumero() { return numero; }
+    public void setNumero(String numero) { this.numero = numero; }
+    
+    public LocalDate getFecha() { return fecha; }
+    public void setFecha(LocalDate fecha) { this.fecha = fecha; }
+    
+    public String getClienteNombre() { return clienteNombre; }
+    public void setClienteNombre(String clienteNombre) { 
+        this.clienteNombre = clienteNombre; 
+    }
+    
+    public Double getTotal() { return total; }
+    public void setTotal(Double total) { this.total = total; }
+    
+    public EstadoPedido getEstado() { return estado; }
+    public void setEstado(EstadoPedido estado) { this.estado = estado; }
+    
+    // ⭐ Getter y Setter para la relación 1→1
+    public Envio getEnvio() { return envio; }
+    public void setEnvio(Envio envio) { this.envio = envio; }
+    
     @Override
     public String toString() {
-        return "Domicilio{" +
+        return "Pedido{" +
                 "id=" + getId() +
-                ", calle='" + calle + '\'' +
                 ", numero='" + numero + '\'' +
+                ", fecha=" + fecha +
+                ", clienteNombre='" + clienteNombre + '\'' +
+                ", total=" + total +
+                ", estado=" + estado +
+                ", envio=" + (envio != null ? envio.getTracking() : "sin envío") +
                 ", eliminado=" + isEliminado() +
                 '}';
     }
-
-    /**
-     * Compara dos domicilios por igualdad SEMÁNTICA.
-     * Dos domicilios son iguales si tienen la misma calle y número.
-     * Nota: NO se compara por ID, permitiendo detectar direcciones duplicadas.
-     *
-     * @param o Objeto a comparar
-     * @return true si los domicilios tienen la misma calle y número
-     */
+    
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        Pedido domicilio = (Pedido) o;
-        return Objects.equals(calle, domicilio.calle) &&
-               Objects.equals(numero, domicilio.numero);
+        Pedido pedido = (Pedido) o;
+        return Objects.equals(numero, pedido.numero);
     }
-
-    /**
-     * Calcula el hash code basado en calle y número.
-     * Consistente con equals(): domicilios con misma calle/número tienen mismo hash.
-     *
-     * @return Hash code del domicilio
-     */
+    
     @Override
     public int hashCode() {
-        return Objects.hash(calle, numero);
+        return Objects.hash(numero);
     }
 }
