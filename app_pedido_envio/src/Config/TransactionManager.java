@@ -3,6 +3,16 @@ package Config;
 import java.sql.Connection;
 import java.sql.SQLException;
 
+/**
+ * Gestor de transacciones para operaciones ACID en la base de datos.
+ * Implementa AutoCloseable para uso con try-with-resources.
+ * 
+ * Uso típico en PedidoService.crearPedidoConEnvio():
+ * - Inicia transacción
+ * - Crea envío
+ * - Crea pedido
+ * - Commit si todo OK, rollback automático si falla
+ */
 public class TransactionManager implements AutoCloseable {
     private Connection conn;
     private boolean transactionActive;

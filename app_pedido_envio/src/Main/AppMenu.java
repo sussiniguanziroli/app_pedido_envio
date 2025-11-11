@@ -1,476 +1,216 @@
 package Main;
 
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
-import java.util.List;
-import java.util.Scanner;
-
-import Config.DatabaseConnection;
 import Dao.EnvioDAO;
 import Dao.PedidoDAO;
-import Models.*;
 import Service.EnvioServiceImpl;
 import Service.PedidoServiceImpl;
 
+import java.util.Scanner;
+
 /**
- * Menú principal de la aplicación Pedido-Envio.
- * Versión simplificada para empezar.
+ * Orquestador principal del menú de la aplicación Pedido-Envio.
+ * Gestiona el ciclo de vida del menú y coordina todas las dependencias.
+ *
+ * Responsabilidades:
+ * - Crear y gestionar el Scanner único (evita múltiples instancias de System.in)
+ * - Inicializar toda la cadena de dependencias (DAOs → Services → Handler)
+ * - Ejecutar el loop principal del menú
+ * - Manejar la selección de opciones y delegarlas a MenuHandler
+ * - Cerrar recursos al salir (Scanner)
+ *
+ * Patrón: Application Controller + Dependency Injection manual
+ * Arquitectura: Punto de entrada que ensambla las 4 capas (Main → Service → DAO → Models)
+ *
+ * IMPORTANTE: Esta clase NO tiene lógica de negocio ni de UI.
+ * Solo coordina y delega.
  */
 public class AppMenu {
+    
+    /**
+     * Scanner único compartido por toda la aplicación.
+     * IMPORTANTE: Solo debe haber UNA instancia de Scanner(System.in).
+     * Múltiples instancias causan problemas de buffering de entrada.
+     */
     private final Scanner scanner;
-    private final PedidoServiceImpl pedidoService;
-    private final EnvioServiceImpl envioService;
-    private final DateTimeFormatter dateFormatter;
+    
+    /**
+     * Handler que ejecuta las operaciones del menú.
+     * Contiene toda la lógica de interacción con el usuario.
+     */
+    private final MenuHandler menuHandler;
+    
+    /**
+     * Flag que controla el loop principal del menú.
+     * Se setea a false cuando el usuario selecciona "0 - Salir".
+     */
     private boolean running;
     
+    /**
+     * Constructor que inicializa la aplicación.
+     *
+     * Flujo de inicialización:
+     * 1. Crea Scanner único para toda la aplicación
+     * 2. Crea cadena de dependencias (DAOs → Services) mediante createPedidoService()
+     * 3. Crea MenuHandler con Scanner y PedidoService
+     * 4. Setea running=true para iniciar el loop
+     *
+     * Patrón de inyección de dependencias (DI) manual:
+     * - EnvioDAO (sin dependencias)
+     * - PedidoDAO (sin dependencias, pero usa EnvioDAO internamente para mapeo)
+     * - EnvioServiceImpl (depende de EnvioDAO)
+     * - PedidoServiceImpl (depende de PedidoDAO y EnvioServiceImpl)
+     * - MenuHandler (depende de Scanner y PedidoServiceImpl)
+     *
+     * Esta inicialización garantiza que todas las dependencias estén correctamente conectadas.
+     */
     public AppMenu() {
         this.scanner = new Scanner(System.in);
-        this.dateFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-        
-        // Inicializar servicios
-        EnvioDAO envioDAO = new EnvioDAO();
-        PedidoDAO pedidoDAO = new PedidoDAO();
-        this.envioService = new EnvioServiceImpl(envioDAO);
-        this.pedidoService = new PedidoServiceImpl(pedidoDAO, envioService);
-        
+        PedidoServiceImpl pedidoService = createPedidoService();
+        this.menuHandler = new MenuHandler(scanner, pedidoService);
         this.running = true;
     }
     
+    /**
+     * Punto de entrada alternativo de la aplicación Java.
+     * Crea instancia de AppMenu y ejecuta el menú principal.
+     *
+     * @param args Argumentos de línea de comandos (no usados)
+     */
     public static void main(String[] args) {
         AppMenu app = new AppMenu();
         app.run();
     }
     
+    /**
+     * Loop principal del menú.
+     *
+     * Flujo:
+     * 1. Mientras running==true:
+     *    a. Muestra menú con MenuDisplay.mostrarMenuPrincipal()
+     *    b. Lee opción del usuario (scanner.nextLine())
+     *    c. Convierte a int (puede lanzar NumberFormatException)
+     *    d. Procesa opción con processOption()
+     * 2. Si el usuario ingresa texto no numérico: Muestra mensaje de error y continúa
+     * 3. Cuando running==false (opción 0): Sale del loop y cierra Scanner
+     *
+     * Manejo de errores:
+     * - NumberFormatException: Captura entrada no numérica (ej: "abc")
+     * - Muestra mensaje amigable y NO termina la aplicación
+     * - El usuario puede volver a intentar
+     *
+     * IMPORTANTE: El Scanner se cierra al salir del loop.
+     * Cerrar Scanner(System.in) cierra System.in para toda la aplicación.
+     */
     public void run() {
-        System.out.println("=================================");
-        System.out.println("  SISTEMA PEDIDO-ENVÍO");
-        System.out.println("=================================\n");
-        
         while (running) {
             try {
-                mostrarMenu();
-                int opcion = leerEntero("Seleccione una opción: ");
-                procesarOpcion(opcion);
-            } catch (Exception e) {
-                System.err.println("❌ Error: " + e.getMessage());
+                MenuDisplay.mostrarMenuPrincipal();
+                int opcion = Integer.parseInt(scanner.nextLine());
+                processOption(opcion);
+            } catch (NumberFormatException e) {
+                System.out.println("❌ Entrada inválida. Por favor, ingrese un número.");
             }
         }
-        
         scanner.close();
-        System.out.println("\n¡Hasta luego!");
+        System.out.println("✅ Aplicación cerrada correctamente.");
     }
     
-    private void mostrarMenu() {
-        System.out.println("\n╔════════════════════════════════════╗");
-        System.out.println("║          MENÚ PRINCIPAL            ║");
-        System.out.println("╠════════════════════════════════════╣");
-        System.out.println("║  PEDIDOS                           ║");
-        System.out.println("║  1. Crear pedido con envío         ║");
-        System.out.println("║  2. Listar todos los pedidos       ║");
-        System.out.println("║  3. Buscar pedido por número       ║");
-        System.out.println("║  4. Actualizar pedido              ║");
-        System.out.println("║  5. Eliminar pedido                ║");
-        System.out.println("║                                    ║");
-        System.out.println("║  ENVÍOS                            ║");
-        System.out.println("║  6. Listar todos los envíos        ║");
-        System.out.println("║  7. Buscar envío por tracking      ║");
-        System.out.println("║  8. Actualizar estado de envío     ║");
-        System.out.println("║                                    ║");
-        System.out.println("║  0. Salir                          ║");
-        System.out.println("╚════════════════════════════════════╝");
-    }
-    
-    private void procesarOpcion(int opcion) {
-        try {
-            switch (opcion) {
-                case 1 -> crearPedidoConEnvio();
-                case 2 -> listarPedidos();
-                case 3 -> buscarPedidoPorNumero();
-                case 4 -> actualizarPedido();
-                case 5 -> eliminarPedido();
-                case 6 -> listarEnvios();
-                case 7 -> buscarEnvioPorTracking();
-                case 8 -> actualizarEstadoEnvio();
-                case 0 -> {
-                    System.out.println("\n👋 Cerrando aplicación...");
-                    running = false;
-                }
-                default -> System.out.println("❌ Opción inválida");
+    /**
+     * Procesa la opción seleccionada por el usuario y delega a MenuHandler.
+     *
+     * Switch expression (Java 14+) con operador arrow (->):
+     * - Más conciso que switch tradicional
+     * - No requiere break (cada caso es independiente)
+     * - Permite bloques con {} para múltiples statements
+     *
+     * Mapeo de opciones (corresponde a MenuDisplay):
+     * === ENVÍOS ===
+     * 1  → Crear envío
+     * 2  → Listar envíos
+     * 3  → Buscar envío por ID
+     * 4  → Buscar envío por tracking
+     * 5  → Actualizar envío
+     * 6  → Eliminar envío (soft delete)
+     * 
+     * === PEDIDOS ===
+     * 7  → Crear pedido sin envío
+     * 8  → Crear pedido con envío (transacción)
+     * 9  → Listar pedidos
+     * 10 → Buscar pedido por ID
+     * 11 → Buscar pedido por número
+     * 12 → Actualizar pedido
+     * 13 → Eliminar pedido (soft delete)
+     * 
+     * 0  → Salir (setea running=false para terminar el loop)
+     *
+     * Opción inválida: Muestra mensaje y continúa el loop.
+     *
+     * IMPORTANTE: Todas las excepciones de MenuHandler se capturan dentro de los métodos.
+     * processOption() NO propaga excepciones al caller (run()).
+     *
+     * @param opcion Número de opción ingresado por el usuario
+     */
+    private void processOption(int opcion) {
+        switch (opcion) {
+            // === ENVÍOS ===
+            case 1 -> menuHandler.crearEnvio();
+            case 2 -> menuHandler.listarEnvios();
+            case 3 -> menuHandler.buscarEnvioPorId();
+            case 4 -> menuHandler.buscarEnvioPorTracking();
+            case 5 -> menuHandler.actualizarEnvio();
+            case 6 -> menuHandler.eliminarEnvio();
+            
+            // === PEDIDOS ===
+            case 7 -> menuHandler.crearPedidoSinEnvio();
+            case 8 -> menuHandler.crearPedidoConEnvio();
+            case 9 -> menuHandler.listarPedidos();
+            case 10 -> menuHandler.buscarPedidoPorId();
+            case 11 -> menuHandler.buscarPedidoPorNumero();
+            case 12 -> menuHandler.actualizarPedido();
+            case 13 -> menuHandler.eliminarPedido();
+            
+            // === SALIR ===
+            case 0 -> {
+                System.out.println("\n👋 Saliendo del sistema...");
+                running = false;
             }
-        } catch (Exception e) {
-            System.err.println("❌ Error: " + e.getMessage());
+            
+            default -> System.out.println("❌ Opción no válida. Intente nuevamente.");
         }
     }
     
-    // ==================== OPERACIONES DE PEDIDO ====================
-    
-    private void crearPedidoConEnvio() {
-        try {
-            System.out.println("\n--- CREAR PEDIDO CON ENVÍO ---");
-            
-            // Datos del pedido
-            String numero = leerTexto("Número de pedido: ").toUpperCase();
-            LocalDate fecha = leerFecha("Fecha (dd/MM/yyyy): ");
-            String clienteNombre = leerTexto("Nombre del cliente: ");
-            double total = leerDouble("Total: $");
-            EstadoPedido estadoPedido = seleccionarEstadoPedido();
-            
-            // Datos del envío
-            System.out.println("\n--- Datos del Envío ---");
-            String tracking = leerTexto("Código de tracking: ").toUpperCase();
-            EmpresaEnvio empresa = seleccionarEmpresa();
-            TipoEnvio tipo = seleccionarTipoEnvio();
-            double costo = leerDouble("Costo del envío: $");
-            EstadoEnvio estadoEnvio = seleccionarEstadoEnvio();
-            
-            // Crear objetos
-            Envio envio = new Envio();
-            envio.setTracking(tracking);
-            envio.setEmpresa(empresa);
-            envio.setTipo(tipo);
-            envio.setCosto(costo);
-            envio.setEstado(estadoEnvio);
-            
-            Pedido pedido = new Pedido();
-            pedido.setNumero(numero);
-            pedido.setFecha(fecha);
-            pedido.setClienteNombre(clienteNombre);
-            pedido.setTotal(total);
-            pedido.setEstado(estadoPedido);
-            pedido.setEnvio(envio);
-            
-            // Guardar con transacción
-            pedidoService.crearPedidoConEnvio(pedido);
-            
-            System.out.println("✅ Pedido creado exitosamente!");
-            System.out.println("   ID Pedido: " + pedido.getId());
-            System.out.println("   ID Envío: " + envio.getId());
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al crear pedido: " + e.getMessage());
-        }
-    }
-    
-    private void listarPedidos() {
-        try {
-            System.out.println("\n--- LISTA DE PEDIDOS ---");
-            List<Pedido> pedidos = pedidoService.getAll();
-            
-            if (pedidos.isEmpty()) {
-                System.out.println("📋 No hay pedidos registrados.");
-                return;
-            }
-            
-            System.out.println("📋 Total de pedidos: " + pedidos.size() + "\n");
-            
-            for (Pedido p : pedidos) {
-                System.out.println("┌─────────────────────────────────────");
-                System.out.println("│ ID: " + p.getId());
-                System.out.println("│ Número: " + p.getNumero());
-                System.out.println("│ Fecha: " + p.getFecha().format(dateFormatter));
-                System.out.println("│ Cliente: " + p.getClienteNombre());
-                System.out.println("│ Total: $" + String.format("%.2f", p.getTotal()));
-                System.out.println("│ Estado: " + p.getEstado());
-                
-                if (p.getEnvio() != null) {
-                    System.out.println("│ Envío: " + p.getEnvio().getTracking() + 
-                                     " (" + p.getEnvio().getEstado() + ")");
-                }
-                
-                System.out.println("└─────────────────────────────────────");
-            }
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al listar pedidos: " + e.getMessage());
-        }
-    }
-    
-    private void buscarPedidoPorNumero() {
-        try {
-            System.out.println("\n--- BUSCAR PEDIDO ---");
-            String numero = leerTexto("Ingrese el número de pedido: ").toUpperCase();
-            
-            Pedido pedido = pedidoService.buscarPorNumero(numero);
-            
-            if (pedido == null) {
-                System.out.println("❌ No se encontró pedido con número: " + numero);
-                return;
-            }
-            
-            mostrarDetallePedido(pedido);
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al buscar pedido: " + e.getMessage());
-        }
-    }
-    
-    private void actualizarPedido() {
-        try {
-            System.out.println("\n--- ACTUALIZAR PEDIDO ---");
-            int id = leerEntero("ID del pedido a actualizar: ");
-            
-            Pedido pedido = pedidoService.getById(id);
-            if (pedido == null) {
-                System.out.println("❌ No se encontró pedido con ID: " + id);
-                return;
-            }
-            
-            System.out.println("\n📋 Pedido actual:");
-            mostrarDetallePedido(pedido);
-            
-            System.out.println("\n--- Nuevos datos (Enter para mantener) ---");
-            
-            String numero = leerTextoOpcional("Número [" + pedido.getNumero() + "]: ");
-            if (!numero.isEmpty()) {
-                pedido.setNumero(numero.toUpperCase());
-            }
-            
-            String cliente = leerTextoOpcional("Cliente [" + pedido.getClienteNombre() + "]: ");
-            if (!cliente.isEmpty()) {
-                pedido.setClienteNombre(cliente);
-            }
-            
-            System.out.print("Total [" + pedido.getTotal() + "]: $");
-            String totalStr = scanner.nextLine();
-            if (!totalStr.isEmpty()) {
-                pedido.setTotal(Double.parseDouble(totalStr));
-            }
-            
-            System.out.println("\nEstado actual: " + pedido.getEstado());
-            System.out.print("¿Cambiar estado? (S/N): ");
-            if (scanner.nextLine().trim().toUpperCase().equals("S")) {
-                pedido.setEstado(seleccionarEstadoPedido());
-            }
-            
-            pedidoService.actualizar(pedido);
-            System.out.println("✅ Pedido actualizado exitosamente!");
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al actualizar pedido: " + e.getMessage());
-        }
-    }
-    
-    private void eliminarPedido() {
-        try {
-            System.out.println("\n--- ELIMINAR PEDIDO ---");
-            int id = leerEntero("ID del pedido a eliminar: ");
-            
-            Pedido pedido = pedidoService.getById(id);
-            if (pedido == null) {
-                System.out.println("❌ No se encontró pedido con ID: " + id);
-                return;
-            }
-            
-            mostrarDetallePedido(pedido);
-            
-            System.out.print("\n⚠️  ¿Está seguro de eliminar este pedido? (S/N): ");
-            String confirmacion = scanner.nextLine().trim().toUpperCase();
-            
-            if (confirmacion.equals("S")) {
-                pedidoService.eliminar(id);
-                System.out.println("✅ Pedido eliminado exitosamente!");
-            } else {
-                System.out.println("❌ Operación cancelada.");
-            }
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al eliminar pedido: " + e.getMessage());
-        }
-    }
-    
-    // ==================== OPERACIONES DE ENVÍO ====================
-    
-    private void listarEnvios() {
-        try {
-            System.out.println("\n--- LISTA DE ENVÍOS ---");
-            List<Envio> envios = envioService.getAll();
-            
-            if (envios.isEmpty()) {
-                System.out.println("📦 No hay envíos registrados.");
-                return;
-            }
-            
-            System.out.println("📦 Total de envíos: " + envios.size() + "\n");
-            
-            for (Envio e : envios) {
-                System.out.println("┌─────────────────────────────────────");
-                System.out.println("│ ID: " + e.getId());
-                System.out.println("│ Tracking: " + e.getTracking());
-                System.out.println("│ Empresa: " + e.getEmpresa());
-                System.out.println("│ Tipo: " + e.getTipo());
-                System.out.println("│ Costo: $" + String.format("%.2f", e.getCosto()));
-                System.out.println("│ Estado: " + e.getEstado());
-                System.out.println("└─────────────────────────────────────");
-            }
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al listar envíos: " + e.getMessage());
-        }
-    }
-    
-    private void buscarEnvioPorTracking() {
-        try {
-            System.out.println("\n--- BUSCAR ENVÍO ---");
-            String tracking = leerTexto("Ingrese el código de tracking: ").toUpperCase();
-            
-            Envio envio = envioService.buscarPorTracking(tracking);
-            
-            if (envio == null) {
-                System.out.println("❌ No se encontró envío con tracking: " + tracking);
-                return;
-            }
-            
-            System.out.println("\n📦 Envío encontrado:");
-            System.out.println("ID: " + envio.getId());
-            System.out.println("Tracking: " + envio.getTracking());
-            System.out.println("Empresa: " + envio.getEmpresa());
-            System.out.println("Tipo: " + envio.getTipo());
-            System.out.println("Costo: $" + String.format("%.2f", envio.getCosto()));
-            System.out.println("Estado: " + envio.getEstado());
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al buscar envío: " + e.getMessage());
-        }
-    }
-    
-    private void actualizarEstadoEnvio() {
-        try {
-            System.out.println("\n--- ACTUALIZAR ESTADO DE ENVÍO ---");
-            int id = leerEntero("ID del envío: ");
-            
-            Envio envio = envioService.getById(id);
-            if (envio == null) {
-                System.out.println("❌ No se encontró envío con ID: " + id);
-                return;
-            }
-            
-            System.out.println("\nEnvío: " + envio.getTracking());
-            System.out.println("Estado actual: " + envio.getEstado());
-            
-            EstadoEnvio nuevoEstado = seleccionarEstadoEnvio();
-            envio.setEstado(nuevoEstado);
-            
-            envioService.actualizar(envio);
-            System.out.println("✅ Estado actualizado exitosamente!");
-            
-        } catch (Exception e) {
-            System.err.println("❌ Error al actualizar envío: " + e.getMessage());
-        }
-    }
-    
-    // ==================== MÉTODOS AUXILIARES ====================
-    
-    private void mostrarDetallePedido(Pedido p) {
-        System.out.println("\n╔═════════════════════════════════════╗");
-        System.out.println("║       DETALLE DEL PEDIDO            ║");
-        System.out.println("╠═════════════════════════════════════╣");
-        System.out.println("║ ID: " + p.getId());
-        System.out.println("║ Número: " + p.getNumero());
-        System.out.println("║ Fecha: " + p.getFecha().format(dateFormatter));
-        System.out.println("║ Cliente: " + p.getClienteNombre());
-        System.out.println("║ Total: $" + String.format("%.2f", p.getTotal()));
-        System.out.println("║ Estado: " + p.getEstado());
-        
-        if (p.getEnvio() != null) {
-            Envio e = p.getEnvio();
-            System.out.println("║─────────────────────────────────────");
-            System.out.println("║ ENVÍO:");
-            System.out.println("║   Tracking: " + e.getTracking());
-            System.out.println("║   Empresa: " + e.getEmpresa());
-            System.out.println("║   Tipo: " + e.getTipo());
-            System.out.println("║   Costo: $" + String.format("%.2f", e.getCosto()));
-            System.out.println("║   Estado: " + e.getEstado());
-        }
-        
-        System.out.println("╚═════════════════════════════════════╝");
-    }
-    
-    private EstadoPedido seleccionarEstadoPedido() {
-        System.out.println("\nEstados de pedido:");
-        EstadoPedido[] estados = EstadoPedido.values();
-        for (int i = 0; i < estados.length; i++) {
-            System.out.println((i + 1) + ". " + estados[i]);
-        }
-        
-        int opcion = leerEntero("Seleccione estado (1-" + estados.length + "): ");
-        return estados[opcion - 1];
-    }
-    
-    private EmpresaEnvio seleccionarEmpresa() {
-        System.out.println("\nEmpresas de envío:");
-        EmpresaEnvio[] empresas = EmpresaEnvio.values();
-        for (int i = 0; i < empresas.length; i++) {
-            System.out.println((i + 1) + ". " + empresas[i]);
-        }
-        
-        int opcion = leerEntero("Seleccione empresa (1-" + empresas.length + "): ");
-        return empresas[opcion - 1];
-    }
-    
-    private TipoEnvio seleccionarTipoEnvio() {
-        System.out.println("\nTipos de envío:");
-        TipoEnvio[] tipos = TipoEnvio.values();
-        for (int i = 0; i < tipos.length; i++) {
-            System.out.println((i + 1) + ". " + tipos[i]);
-        }
-        
-        int opcion = leerEntero("Seleccione tipo (1-" + tipos.length + "): ");
-        return tipos[opcion - 1];
-    }
-    
-    private EstadoEnvio seleccionarEstadoEnvio() {
-        System.out.println("\nEstados de envío:");
-        EstadoEnvio[] estados = EstadoEnvio.values();
-        for (int i = 0; i < estados.length; i++) {
-            System.out.println((i + 1) + ". " + estados[i]);
-        }
-        
-        int opcion = leerEntero("Seleccione estado (1-" + estados.length + "): ");
-        return estados[opcion - 1];
-    }
-    
-    private String leerTexto(String prompt) {
-        System.out.print(prompt);
-        return scanner.nextLine().trim();
-    }
-    
-    private String leerTextoOpcional(String prompt) {
-        System.out.print(prompt);
-        return scanner.nextLine().trim();
-    }
-    
-    private int leerEntero(String prompt) {
-        while (true) {
-            try {
-                System.out.print(prompt);
-                return Integer.parseInt(scanner.nextLine().trim());
-            } catch (NumberFormatException e) {
-                System.out.println("❌ Por favor ingrese un número válido.");
-            }
-        }
-    }
-    
-    private double leerDouble(String prompt) {
-        while (true) {
-            try {
-                System.out.print(prompt);
-                return Double.parseDouble(scanner.nextLine().trim());
-            } catch (NumberFormatException e) {
-                System.out.println("❌ Por favor ingrese un número válido.");
-            }
-        }
-    }
-    
-    private LocalDate leerFecha(String prompt) {
-        while (true) {
-            try {
-                System.out.print(prompt);
-                String fechaStr = scanner.nextLine().trim();
-                return LocalDate.parse(fechaStr, dateFormatter);
-            } catch (DateTimeParseException e) {
-                System.out.println("❌ Formato de fecha inválido. Use dd/MM/yyyy");
-            }
-        }
+    /**
+     * Factory method que crea la cadena de dependencias de servicios.
+     * Implementa inyección de dependencias manual.
+     *
+     * Orden de creación (bottom-up desde la capa más baja):
+     * 1. EnvioDAO: Sin dependencias, acceso directo a BD
+     * 2. PedidoDAO: Sin dependencias directas (usa EnvioDAO.mapearEnvio() internamente)
+     * 3. EnvioServiceImpl: Depende de EnvioDAO
+     * 4. PedidoServiceImpl: Depende de PedidoDAO y EnvioServiceImpl
+     *
+     * Arquitectura resultante (4 capas):
+     * Main (AppMenu, MenuHandler, MenuDisplay)
+     *   ↓
+     * Service (PedidoServiceImpl, EnvioServiceImpl)
+     *   ↓
+     * DAO (PedidoDAO, EnvioDAO)
+     *   ↓
+     * Models (Pedido, Envio, Base)
+     *
+     * ¿Por qué PedidoService necesita EnvioService?
+     * - Para crear/actualizar envíos al crear/actualizar pedidos
+     * - Para coordinar transacciones (crearPedidoConEnvio)
+     * - Para gestionar la relación unidireccional Pedido→Envio
+     *
+     * Patrón: Factory Method para construcción de dependencias
+     *
+     * @return PedidoServiceImpl completamente inicializado con todas sus dependencias
+     */
+    private PedidoServiceImpl createPedidoService() {
+        EnvioDAO envioDAO = new EnvioDAO();
+        PedidoDAO pedidoDAO = new PedidoDAO();
+        EnvioServiceImpl envioService = new EnvioServiceImpl(envioDAO);
+        return new PedidoServiceImpl(pedidoDAO, envioService);
     }
 }
