@@ -247,9 +247,55 @@ public class PedidoDAO implements GenericDAO<Pedido> {
         }
     }
     
-    // ============================================
-    // MÉTODO ADICIONAL: buscar por número
-    // ============================================
+    // ==============================================
+    // MÉTODOS ADICIONALES: buscar por número/envioId
+    // ==============================================
+    
+    /**
+     * Busca un pedido por su envío asociado.
+     * Usado para validar que un envío no esté ya usado por otro pedido.
+     * 
+     * @param envioId ID del envío
+     * @return Pedido que usa ese envío o null
+     * @throws SQLException si ocurre un error
+     */
+    public Pedido buscarPorEnvioId(Long envioId) throws SQLException {
+        String sql = "SELECT p.id as p_id, p.eliminado as p_eliminado, p.numero, p.fecha, " +
+                     "p.cliente_nombre, p.total, p.estado as p_estado, p.envio_id " +
+                     "FROM pedido p WHERE p.envio_id = ? AND p.eliminado = 0";
+
+        try (Connection conn = DatabaseConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setLong(1, envioId);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    // Mapear solo pedido (sin envío para evitar recursión)
+                    Pedido pedido = new Pedido();
+                    pedido.setId(rs.getLong("p_id"));
+                    pedido.setEliminado(rs.getBoolean("p_eliminado"));
+                    pedido.setNumero(rs.getString("numero"));
+
+                    Date fecha = rs.getDate("fecha");
+                    if (fecha != null) {
+                        pedido.setFecha(fecha.toLocalDate());
+                    }
+
+                    pedido.setClienteNombre(rs.getString("cliente_nombre"));
+                    pedido.setTotal(rs.getObject("total", Double.class));
+
+                    String estadoStr = rs.getString("p_estado");
+                    if (estadoStr != null) {
+                        pedido.setEstado(EstadoPedido.valueOf(estadoStr));
+                    }
+
+                    return pedido;
+                }
+            }
+        }
+        return null;
+    }    
     
     /**
      * Busca un pedido por su número (campo UNIQUE).

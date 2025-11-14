@@ -60,13 +60,13 @@ public class MenuDisplay {
         System.out.println("  6. Eliminar envío");
         
         System.out.println("\nGESTIÓN DE PEDIDOS:");
-        System.out.println("  7. Crear pedido sin envío");
-        System.out.println("  8. Crear pedido con envío (transacción)");
-        System.out.println("  9. Listar pedidos");
-        System.out.println("  10. Buscar pedido por ID");
-        System.out.println("  11. Buscar pedido por número");
-        System.out.println("  12. Actualizar pedido");
-        System.out.println("  13. Eliminar pedido");
+        // System.out.println("  7. Crear pedido sin envío");
+        System.out.println("  7. Crear pedido con envío (transacción)");
+        System.out.println("  8. Listar pedidos");
+        System.out.println("  9. Buscar pedido por ID");
+        System.out.println("  10. Buscar pedido por número");
+        System.out.println("  11. Actualizar pedido");
+        System.out.println("  12. Eliminar pedido");
         
         System.out.println("\nSALIR:");
         System.out.println("  0. Salir del sistema");

@@ -64,17 +64,20 @@ public class PedidoServiceImpl implements GenericService<Pedido> {
     
     @Override
     public void crear(Pedido pedido) throws IllegalArgumentException, SQLException {
-        // Validar datos básicos
+        // Validar datos básicos (incluye validación de envío obligatorio)
         validarPedido(pedido);
-        
+
         // Validar unicidad de número
         validarNumeroUnico(pedido.getNumero(), null);
-        
-        // Si tiene envío NUEVO (sin ID), crearlo primero
-        if (pedido.getEnvio() != null && (pedido.getEnvio().getId() == null || pedido.getEnvio().getId() <= 0)) {
+
+        // Si el envío NO tiene ID, crearlo primero
+        if (pedido.getEnvio().getId() == null || pedido.getEnvio().getId() <= 0) {
             envioService.crear(pedido.getEnvio());
         }
-        
+
+        // Validar que el envío no esté ya usado por otro pedido
+        validarEnvioUnico(pedido.getEnvio().getId(), null);
+
         // Crear pedido
         pedidoDAO.crear(pedido);
     }
@@ -165,24 +168,27 @@ public class PedidoServiceImpl implements GenericService<Pedido> {
         if (pedido.getId() == null || pedido.getId() <= 0) {
             throw new IllegalArgumentException("El pedido debe tener un ID válido para actualizar");
         }
-        
+
         // Validar que exista
         Pedido existente = pedidoDAO.leer(pedido.getId());
         if (existente == null) {
             throw new IllegalArgumentException("No se encontró pedido con ID: " + pedido.getId());
         }
-        
-        // Validar datos
+
+        // Validar datos (incluye envío obligatorio)
         validarPedido(pedido);
-        
+
         // Validar número único (excluyendo el actual)
         validarNumeroUnico(pedido.getNumero(), pedido.getId());
-        
-        // Si tiene envío asociado, actualizarlo también
-        if (pedido.getEnvio() != null && pedido.getEnvio().getId() != null && pedido.getEnvio().getId() > 0) {
+
+        // Validar que el envío no esté usado por otro pedido
+        validarEnvioUnico(pedido.getEnvio().getId(), pedido.getId());
+
+        // Si el envío cambió, actualizar también
+        if (!pedido.getEnvio().getId().equals(existente.getEnvio().getId())) {
             envioService.actualizar(pedido.getEnvio());
         }
-        
+
         // Actualizar pedido
         pedidoDAO.actualizar(pedido);
     }
@@ -302,8 +308,38 @@ public class PedidoServiceImpl implements GenericService<Pedido> {
         if (pedido.getEstado() == null) {
             throw new IllegalArgumentException("El estado es obligatorio");
         }
+        
+            // VALIDACIÓN 1→1 ESTRICTO: Envío obligatorio
+        if (pedido.getEnvio() == null) {
+            throw new IllegalArgumentException(
+                "El pedido debe tener un envío asociado (relación 1→1 obligatoria)"
+            );
+        }
+        
     }
     
+    private void validarEnvioUnico(Long envioId, Long pedidoIdExcluir) 
+            throws IllegalArgumentException, SQLException {
+
+        if (envioId == null) {
+            throw new IllegalArgumentException("El ID del envío no puede ser null");
+        }
+
+        // Verificar que el envío no esté ya asociado a otro pedido
+        Pedido pedidoExistente = pedidoDAO.buscarPorEnvioId(envioId);
+
+        if (pedidoExistente != null) {
+            // Si estamos actualizando, excluir el propio registro
+            if (pedidoIdExcluir == null || !pedidoExistente.getId().equals(pedidoIdExcluir)) {
+                throw new IllegalArgumentException(
+                    "El envío ya está asociado al pedido: " + pedidoExistente.getNumero() + 
+                    " (ID: " + pedidoExistente.getId() + ")"
+                );
+            }
+        }
+    }    
+    
+
     /**
      * Valida que el número de pedido sea único en el sistema.
      * 

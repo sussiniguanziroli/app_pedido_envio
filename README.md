@@ -134,7 +134,16 @@ pedido-envio/
 - envio_id (BIGINT, FK → envio.id, NULL)
 ```
 
-**Relación:** Pedido → Envío (unidireccional, 1:1, ON DELETE SET NULL)
+**Relación:** Pedido → Envío (unidireccional, 1:1 estricta)
+- Un Pedido DEBE tener exactamente un Envío (`envio_id NOT NULL`)
+- Un Envío solo puede estar en un Pedido (`UNIQUE envio_id`)
+- Unidireccional: Pedido conoce a Envío, Envío no conoce a Pedido
+- ON DELETE RESTRICT: No se puede eliminar envío con pedido asociado
+- Garantizado por: FK + UNIQUE + NOT NULL en BD, validaciones en Service
+
+**Flujos permitidos:**
+1. Crear Envío independiente → Disponible para asignar a pedidos
+2. Crear Pedido + Envío en transacción → Ambos se crean juntos (opción 8)
 
 ## Instalación y Configuración
 
@@ -248,13 +257,12 @@ GESTIÓN DE ENVÍOS:
   6. Eliminar envío
 
 GESTIÓN DE PEDIDOS:
-  7. Crear pedido sin envío
-  8. Crear pedido con envío (transacción)
-  9. Listar pedidos
-  10. Buscar pedido por ID
-  11. Buscar pedido por número
-  12. Actualizar pedido
-  13. Eliminar pedido
+  7. Crear pedido con envío (transacción)
+  8. Listar pedidos
+  9. Buscar pedido por ID
+  10. Buscar pedido por número
+  11. Actualizar pedido
+  12. Eliminar pedido
 
 SALIR:
   0. Salir del sistema
@@ -303,7 +311,35 @@ SELECT * FROM pedido WHERE id = 1;  -- eliminado = 1
 - **Número único** (no puede haber duplicados)
 - **Total >= 0** (no puede ser negativo)
 - **Campos obligatorios** (numero, fecha, cliente_nombre, total, estado)
-- **Integridad referencial** (envio_id debe existir o ser NULL)
+- **Envío obligatorio** (envio_id NOT NULL, debe existir)
+- **Envío único** (un envío solo puede estar en un pedido)
+- **Integridad referencial** (envio_id debe referenciar envío existente)
+
+**Validaciones en Aplicación:**
+- Service valida que pedido tenga envío antes de crear
+- Service valida que envío no esté ya usado por otro pedido
+- Transacción atómica garantiza consistencia (commit/rollback)
+
+### Escenarios Soportados
+
+**1. Crear Envío Independiente (Opción 1)**
+```
+Un envío puede crearse sin pedido asociado (inventario disponible)
+Posteriormente puede asignarse a un pedido nuevo
+```
+
+**2. Crear Pedido + Envío en Transacción (Opción 8)**
+```
+Ambos se crean juntos en una operación atómica
+Si algo falla, ninguno se crea (rollback automático)
+```
+
+**3. Restricción al Eliminar**
+```
+No se puede eliminar un envío que tiene pedido asociado
+Garantizado por ON DELETE RESTRICT en la FK
+```
+
 
 ## Arquitectura y Patrones
 

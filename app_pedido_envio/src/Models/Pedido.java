@@ -112,7 +112,7 @@ public class Pedido extends Base {
      * @param clienteNombre Nombre del cliente
      * @param total Monto total del pedido
      * @param estado Estado inicial del pedido
-     */
+     
     public Pedido(String numero, LocalDate fecha, String clienteNombre, 
                   Double total, EstadoPedido estado) {
         super();
@@ -122,7 +122,7 @@ public class Pedido extends Base {
         this.total = total;
         this.estado = estado;
     }
-
+    */
     /**
      * Constructor completo con envío (sin id, se genera automáticamente).
      * Usado para crear pedidos con envío ya asignado.
@@ -136,7 +136,12 @@ public class Pedido extends Base {
      */
     public Pedido(String numero, LocalDate fecha, String clienteNombre, 
                   Double total, EstadoPedido estado, Envio envio) {
-        this(numero, fecha, clienteNombre, total, estado);
+        super();
+        this.numero = numero;
+        this.fecha = fecha;
+        this.clienteNombre = clienteNombre;
+        this.total = total;
+        this.estado = estado;
         this.envio = envio;
     }
 
@@ -202,7 +207,7 @@ public class Pedido extends Base {
      * @return true si tiene envío, false si envio es null
      */
     public boolean tieneEnvio() {
-        return envio != null;
+        return envio != null && envio.getId() != null && envio.getId() > 0;
     }
     
     /**

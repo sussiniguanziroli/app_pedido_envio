@@ -133,7 +133,7 @@ public class AppMenu {
      * 6  → Eliminar envío (soft delete)
      * 
      * === PEDIDOS ===
-     * 7  → Crear pedido sin envío
+     // * 7  → Crear pedido sin envío
      * 8  → Crear pedido con envío (transacción)
      * 9  → Listar pedidos
      * 10 → Buscar pedido por ID
@@ -161,13 +161,13 @@ public class AppMenu {
             case 6 -> menuHandler.eliminarEnvio();
             
             // === PEDIDOS ===
-            case 7 -> menuHandler.crearPedidoSinEnvio();
-            case 8 -> menuHandler.crearPedidoConEnvio();
-            case 9 -> menuHandler.listarPedidos();
-            case 10 -> menuHandler.buscarPedidoPorId();
-            case 11 -> menuHandler.buscarPedidoPorNumero();
-            case 12 -> menuHandler.actualizarPedido();
-            case 13 -> menuHandler.eliminarPedido();
+            //case 7 -> menuHandler.crearPedidoSinEnvio();
+            case 7 -> menuHandler.crearPedidoConEnvio();
+            case 8 -> menuHandler.listarPedidos();
+            case 9 -> menuHandler.buscarPedidoPorId();
+            case 10 -> menuHandler.buscarPedidoPorNumero();
+            case 11 -> menuHandler.actualizarPedido();
+            case 12 -> menuHandler.eliminarPedido();
             
             // === SALIR ===
             case 0 -> {

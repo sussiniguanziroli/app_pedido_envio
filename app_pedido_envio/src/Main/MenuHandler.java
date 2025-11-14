@@ -546,6 +546,8 @@ public class MenuHandler {
      * Las validaciones de negocio (número único, total >= 0)
      * se realizan en PedidoServiceImpl.
      */
+    
+    /*
     public void crearPedidoSinEnvio() {
         MenuDisplay.mostrarSeparador();
         System.out.println("CREAR NUEVO PEDIDO (SIN ENVÍO)");
@@ -621,7 +623,7 @@ public class MenuHandler {
             e.printStackTrace();
         }
     }
-    
+    */
 
 /**
      * Crea un nuevo pedido CON envío en una TRANSACCIÓN ATÓMICA.
@@ -775,11 +777,11 @@ public class MenuHandler {
             }
             
             // ═══ PASO 3: CREAR OBJETOS ═══
-            Pedido pedido = new Pedido(numero, fecha, clienteNombre, total, estadoPedido);
             Envio envio = new Envio(tracking, empresa, tipo, costo, fechaDespacho, fechaEstimada, estadoEnvio);
+            Pedido pedido = new Pedido(numero, fecha, clienteNombre, total, estadoPedido, envio);
             
             // ═══ PASO 4: ASOCIAR ENVÍO AL PEDIDO ═══
-            pedido.setEnvio(envio);
+            // pedido.setEnvio(envio);
             
             // ═══ PASO 5: TRANSACCIÓN ═══
             System.out.println("\nCreando pedido con envío en transacción...");
