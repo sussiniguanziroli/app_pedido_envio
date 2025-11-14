@@ -390,6 +390,4 @@ Este proyecto representa la integración de todos los conceptos vistos durante e
 
 ## Autores
 
-Matías Ezequiel Vazquez
-Patricio Sussini Guanziroli
-Lucas Martín Zárate
+Matías Ezequiel Vazquez // Patricio Sussini Guanziroli // Lucas Martín Zárate
