@@ -29,10 +29,10 @@ CREATE TABLE pedido (
     cliente_nombre VARCHAR(120) NOT NULL,
     total DECIMAL(12,2) NOT NULL,
     estado ENUM ('NUEVO', 'FACTURADO', 'ENVIADO') NOT NULL DEFAULT 'NUEVO',
-    envio_id BIGINT NULL,
+    envio_id BIGINT NOT NULL,
     CONSTRAINT fk_pedido_envio FOREIGN KEY (envio_id) 
         REFERENCES ENVIO(id)
-        ON DELETE SET NULL
+        ON DELETE RESTRICT
         ON UPDATE CASCADE,	
 	CONSTRAINT uk_pedido_numero UNIQUE (numero),
     CONSTRAINT uk_pedido_id UNIQUE (id),
