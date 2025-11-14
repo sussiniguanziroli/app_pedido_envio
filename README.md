@@ -1,4 +1,10 @@
-# Sistema de Gestión de Personas y Domicilios
+# Sistema de Gestión de Pedidos y Envíos
+
+Sistema de gestión de pedidos y envíos desarrollado en Java con arquitectura en capas, implementando patrones DAO, Service y transacciones ACID.
+
+## Descripción
+
+Aplicación de consola que permite gestionar pedidos y sus envíos asociados, con soporte para operaciones CRUD completas, soft delete y transacciones atómicas. El sistema mantiene una relación unidireccional Pedido→Envío con integridad referencial.
 
 ## Trabajo Práctico Integrador - Programación 2
 
@@ -57,513 +63,315 @@ El sistema permite gestionar dos entidades principales con las siguientes operac
 
 ## Características Principales
 
-- **Gestión de Personas**: Crear, listar, actualizar y eliminar personas con validación de DNI único
-- **Gestión de Domicilios**: Administrar domicilios de forma independiente o asociados a personas
-- **Búsqueda Inteligente**: Filtrar personas por nombre o apellido con coincidencias parciales
-- **Soft Delete**: Eliminación lógica que preserva la integridad de datos
-- **Seguridad**: Protección contra SQL injection mediante PreparedStatements
-- **Validación Multi-capa**: Validaciones en capa de servicio y base de datos
+- **CRUD completo**: Crear, listar, actualizar y eliminar pedidos con/sin envíos asociados
+- **Gestión de Envíos**: Administrar envíos de forma independiente o asociados a pedidos
+- **Transacciones ACID**: Para crear pedido con envío en una sola operación
+- **Soft delete**: Eliminación lógica que preserva la integridad de datos
+- **Validaciones de negocio**: Unicidad, consistencia de fechas, valores no negativos
+- **Arquitectura en capas**: Models, DAO, Service, Main
 - **Transacciones**: Soporte para operaciones atómicas con rollback automático
+- **Interfaz de consola**: Menú interactivo que permite facilidad de navegación
 
-## Requisitos del Sistema
+## Tecnologías Utilizadas
 
-| Componente | Versión Requerida |
-|------------|-------------------|
-| Java JDK | 17 o superior |
-| MySQL | 8.0 o superior |
-| Gradle | 8.12 (incluido wrapper) |
-| Sistema Operativo | Windows, Linux o macOS |
+- **Java 17+**
+- **MySQL 8.0+**
+- **JDBC** (MySQL Connector/J 8.0.33)
 
-## Instalación
 
-### 1. Configurar Base de Datos
+## Estructura del Proyecto
+```
+pedido-envio/
+├── Config/
+│   ├── DatabaseConnection.java    # Conexión a base de datos
+│   └── TransactionManager.java    # Gestión de transacciones
+├── Models/
+│   ├── Base.java                  # Clase base con ID y eliminado
+│   ├── Envio.java                 # Entidad Envío con enums
+│   └── Pedido.java                # Entidad Pedido con relación a Envío
+├── Dao/
+│   ├── GenericDAO.java            # Interfaz genérica CRUD
+│   ├── EnvioDAO.java              # DAO de Envío
+│   └── PedidoDAO.java             # DAO de Pedido con JOIN
+├── Service/
+│   ├── GenericService.java        # Interfaz de servicios
+│   ├── EnvioServiceImpl.java      # Lógica de negocio de Envío
+│   └── PedidoServiceImpl.java     # Lógica de negocio de Pedido
+├── Main/
+│   ├── Main.java                  # Punto de entrada
+│   ├── AppMenu.java               # Controlador del menú
+│   ├── MenuDisplay.java           # Visualización del menú
+│   ├── MenuHandler.java           # Handlers de operaciones
+│   └── TestConexion.java          # Verificación de conexión
+└── lib/
+    └── mysql-connector-j-8.0.33.jar
+```
 
-Ejecutar el siguiente script SQL en MySQL:
+## Modelo de Datos
 
+### Tabla: `envio`
 ```sql
-CREATE DATABASE IF NOT EXISTS dbtpi3;
-USE dbtpi3;
+- id (BIGINT, PK, AUTO_INCREMENT)
+- eliminado (BOOLEAN, DEFAULT FALSE)
+- tracking (VARCHAR(40), UNIQUE)
+- empresa (ENUM: ANDREANI, OCA, CORREO_ARG)
+- tipo (ENUM: ESTANDAR, EXPRES)
+- costo (DECIMAL(10,2), >= 0)
+- fecha_despacho (DATE, NULL)
+- fecha_estimada (DATE, NULL)
+- estado (ENUM: EN_PREPARACION, EN_TRANSITO, ENTREGADO)
+```
 
-CREATE TABLE domicilios (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    calle VARCHAR(100) NOT NULL,
-    numero VARCHAR(10) NOT NULL,
-    eliminado BOOLEAN DEFAULT FALSE
+### Tabla: `pedido`
+```sql
+- id (BIGINT, PK, AUTO_INCREMENT)
+- eliminado (BOOLEAN, DEFAULT FALSE)
+- numero (VARCHAR(20), UNIQUE)
+- fecha (DATE, NOT NULL)
+- cliente_nombre (VARCHAR(120), NOT NULL)
+- total (DECIMAL(12,2), >= 0)
+- estado (ENUM: NUEVO, FACTURADO, ENVIADO)
+- envio_id (BIGINT, FK → envio.id, NULL)
+```
+
+**Relación:** Pedido → Envío (unidireccional, 1:1, ON DELETE SET NULL)
+
+## Instalación y Configuración
+
+### Requisitos Previos
+
+- JDK 17 o superior
+- MySQL 8.0 o superior
+- XAMPP/WAMP/MySQL Workbench
+
+### Paso 1: Configurar Base de Datos
+
+1. Iniciar MySQL
+2. Ejecutar script de esquema:
+```sql
+DROP SCHEMA IF EXISTS pedido_envio;
+CREATE SCHEMA pedido_envio;
+USE pedido_envio;
+
+-- Crear tabla envio
+CREATE TABLE envio (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    eliminado BOOL DEFAULT FALSE NOT NULL,
+    tracking VARCHAR(40) UNIQUE,
+    empresa ENUM('ANDREANI', 'OCA', 'CORREO_ARG') NOT NULL,
+    tipo ENUM('ESTANDAR', 'EXPRES') NOT NULL DEFAULT 'ESTANDAR',
+    costo DECIMAL(10,2) NOT NULL,
+    fecha_despacho DATE,
+    fecha_estimada DATE,
+    estado ENUM ('EN_PREPARACION', 'EN_TRANSITO', 'ENTREGADO') NOT NULL DEFAULT 'EN_PREPARACION',
+    CONSTRAINT chk_envio_costo CHECK (costo >= 0)
 );
 
-CREATE TABLE personas (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    nombre VARCHAR(50) NOT NULL,
-    apellido VARCHAR(50) NOT NULL,
-    dni VARCHAR(20) NOT NULL UNIQUE,
-    domicilio_id INT,
-    eliminado BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (domicilio_id) REFERENCES domicilios(id)
+-- Crear tabla pedido
+CREATE TABLE pedido (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    eliminado BOOL DEFAULT FALSE NOT NULL,
+    numero VARCHAR(20) NOT NULL,
+    fecha DATE NOT NULL,
+    cliente_nombre VARCHAR(120) NOT NULL,
+    total DECIMAL(12,2) NOT NULL,
+    estado ENUM ('NUEVO', 'FACTURADO', 'ENVIADO') NOT NULL DEFAULT 'NUEVO',
+    envio_id BIGINT NULL,
+    CONSTRAINT fk_pedido_envio FOREIGN KEY (envio_id) 
+        REFERENCES envio(id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE,	
+    CONSTRAINT uk_pedido_numero UNIQUE (numero),
+    CONSTRAINT uk_pedido_envio_id UNIQUE (envio_id),
+    CONSTRAINT chk_pedido_total CHECK (total >= 0)
 );
 ```
 
-### 2. Compilar el Proyecto
+3. Insertar datos de prueba:
+```sql
+INSERT INTO envio (id, eliminado, tracking, empresa, tipo, costo, fecha_despacho, fecha_estimada, estado) VALUES
+(1, 0, 'AND-2025-000001', 'ANDREANI', 'EXPRES', 1500.00, '2025-01-15', '2025-01-17', 'EN_TRANSITO'),
+(2, 0, 'OCA-2025-000001', 'OCA', 'ESTANDAR', 800.00, '2025-01-14', '2025-01-20', 'ENTREGADO'),
+(3, 0, 'ARG-2025-000001', 'CORREO_ARG', 'ESTANDAR', 600.00, '2025-01-16', '2025-01-22', 'EN_PREPARACION'),
+(4, 0, 'ARG-2025-000002', 'CORREO_ARG', 'ESTANDAR', 600.00, '2025-01-16', '2025-01-22', 'ENTREGADO');
 
+INSERT INTO pedido (id, eliminado, numero, fecha, cliente_nombre, total, estado, envio_id) VALUES
+(1, 0, 'PED-2025-0001', '2025-01-10', 'Juan Pérez', 25000.50, 'ENVIADO', 1),
+(2, 0, 'PED-2025-0002', '2025-01-11', 'María González', 15500.00, 'ENVIADO', 2),
+(3, 0, 'PED-2025-0003', '2025-01-12', 'Carlos Rodríguez', 8900.75, 'FACTURADO', 3),
+(4, 0, 'PED-2025-0004', '2025-01-13', 'Ana Martínez', 12300.00, 'NUEVO', 4);
+
+COMMIT;
+```
+
+### Paso 2: Configurar Conexión
+
+Editar `Config/DatabaseConnection.java`:
+```java
+private static final String URL = "jdbc:mysql://localhost:3306/pedido_envio";
+private static final String USER = "root";
+private static final String PASSWORD = "";  // Ajustar según tu configuración
+```
+
+### Paso 3: Agregar Driver JDBC
+
+1. Descargar `mysql-connector-j-8.0.33.jar`
+2. Colocar en carpeta `lib/`
+3. Agregar al classpath del IDE
+
+### Paso 4: Compilar y Ejecutar
+
+**Desde IDE:**
+```
+Run Main.java o AppMenu.java
+```
+
+**Desde línea de comandos:**
 ```bash
-# Linux/macOS
-./gradlew clean build
+# Compilar
+javac -cp "lib/*" -d bin Config/*.java Models/*.java Dao/*.java Service/*.java Main/*.java
 
-# Windows
-gradlew.bat clean build
-```
-
-### 3. Configurar Conexión (Opcional)
-
-Por defecto conecta a:
-- **Host**: localhost:3306
-- **Base de datos**: dbtpi3
-- **Usuario**: root
-- **Contraseña**: (vacía)
-
-Para cambiar la configuración, usar propiedades del sistema:
-
-```bash
-java -Ddb.url=jdbc:mysql://localhost:3306/dbtpi3 \
-     -Ddb.user=usuario \
-     -Ddb.password=clave \
-     -cp ...
-```
-
-## Ejecución
-
-### Opción 1: Desde IDE
-1. Abrir proyecto en IntelliJ IDEA o Eclipse
-2. Ejecutar clase `Main.Main`
-
-### Opción 2: Línea de comandos
-
-**Windows:**
-```bash
-# Localizar JAR de MySQL
-dir /s /b %USERPROFILE%\.gradle\caches\*mysql-connector-j-8.4.0.jar
-
-# Ejecutar (reemplazar <ruta-mysql-jar>)
-java -cp "build\classes\java\main;<ruta-mysql-jar>" Main.Main
-```
-
-**Linux/macOS:**
-```bash
-# Localizar JAR de MySQL
-find ~/.gradle/caches -name "mysql-connector-j-8.4.0.jar"
-
-# Ejecutar (reemplazar <ruta-mysql-jar>)
-java -cp "build/classes/java/main:<ruta-mysql-jar>" Main.Main
-```
-
-### Verificar Conexión
-
-```bash
-# Usar TestConexion para verificar conexión a BD
-java -cp "build/classes/java/main:<ruta-mysql-jar>" Main.TestConexion
-```
-
-Salida esperada:
-```
-Conexion exitosa a la base de datos
-Usuario conectado: root@localhost
-Base de datos: dbtpi3
-URL: jdbc:mysql://localhost:3306/dbtpi3
-Driver: MySQL Connector/J v8.4.0
+# Ejecutar
+java -cp "lib/*:bin" Main.Main
 ```
 
 ## Uso del Sistema
 
 ### Menú Principal
-
 ```
-========= MENU =========
-1. Crear persona
-2. Listar personas
-3. Actualizar persona
-4. Eliminar persona
-5. Crear domicilio
-6. Listar domicilios
-7. Actualizar domicilio por ID
-8. Eliminar domicilio por ID
-9. Actualizar domicilio por ID de persona
-10. Eliminar domicilio por ID de persona
-0. Salir
-```
+GESTIÓN DE ENVÍOS:
+  1. Crear envío
+  2. Listar envíos
+  3. Buscar envío por ID
+  4. Buscar envío por tracking
+  5. Actualizar envío
+  6. Eliminar envío
 
-### Operaciones Disponibles
+GESTIÓN DE PEDIDOS:
+  7. Crear pedido sin envío
+  8. Crear pedido con envío (transacción)
+  9. Listar pedidos
+  10. Buscar pedido por ID
+  11. Buscar pedido por número
+  12. Actualizar pedido
+  13. Eliminar pedido
 
-#### 1. Crear Persona
-- Captura nombre, apellido y DNI
-- Permite agregar domicilio opcionalmente
-- Valida DNI único (no permite duplicados)
-
-**Ejemplo:**
-```
-Nombre: Juan
-Apellido: Pérez
-DNI: 12345678
-¿Desea agregar un domicilio? (s/n): s
-Calle: San Martín
-Numero: 123
+SALIR:
+  0. Salir del sistema
 ```
 
-#### 2. Listar Personas
-Dos opciones:
-- **(1) Listar todos**: Muestra todas las personas activas
-- **(2) Buscar**: Filtra por nombre o apellido
+### Funcionalidades Clave
 
-**Ejemplo de búsqueda:**
+#### Crear Pedido con Envío (Transacción ACID)
+
+Opción más importante del sistema. Crea pedido y envío en una sola transacción atómica:
 ```
-Ingrese texto a buscar: Juan
-```
-**Resultado:**
-```
-ID: 1, Nombre: Juan, Apellido: Pérez, DNI: 12345678
-   Domicilio: San Martín 123
+Opción 8 → Ingresa datos del pedido → Ingresa datos del envío
+→ Si todo OK: ambos se crean
+→ Si algo falla: rollback automático (ninguno se crea)
 ```
 
-#### 3. Actualizar Persona
-- Permite modificar nombre, apellido, DNI
-- Permite actualizar o agregar domicilio
-- Presionar Enter sin escribir mantiene el valor actual
-
-**Ejemplo:**
+**Ejemplo de validación con rollback:**
 ```
-ID de la persona a actualizar: 1
-Nuevo nombre (actual: Juan, Enter para mantener):
-Nuevo apellido (actual: Pérez, Enter para mantener): González
-Nuevo DNI (actual: 12345678, Enter para mantener):
-¿Desea actualizar el domicilio? (s/n): n
+- Ingresa tracking duplicado (ej: AND-2025-000001)
+- Sistema rechaza y hace rollback
+- Ni pedido ni envío se crean en la BD
 ```
 
-#### 4. Eliminar Persona
-- Eliminación lógica (marca como eliminado, no borra físicamente)
-- Requiere ID de la persona
+#### Soft Delete
 
-#### 5. Crear Domicilio
-- Crea domicilio independiente sin asociarlo a persona
-- Puede asociarse posteriormente
+Los registros eliminados se marcan con `eliminado = TRUE` pero permanecen en la BD:
+```sql
+-- Antes de eliminar
+SELECT * FROM pedido WHERE id = 0;  -- eliminado = 0
 
-#### 6. Listar Domicilios
-- Muestra todos los domicilios activos con ID, calle y número
+-- Después de eliminar
+SELECT * FROM pedido WHERE id = 1;  -- eliminado = 1
 
-#### 7. Actualizar Domicilio por ID
-- Actualiza calle y/o número de cualquier domicilio
-- Requiere ID del domicilio
-
-#### 8. Eliminar Domicilio por ID
-- ⚠️ **ADVERTENCIA**: Puede dejar referencias huérfanas si está asociado a persona
-- Usar opción 10 como alternativa segura
-
-#### 9. Actualizar Domicilio por Persona
-- Actualiza el domicilio asociado a una persona específica
-- Requiere ID de la persona
-
-#### 10. Eliminar Domicilio por Persona (RECOMENDADO)
-- ✅ **Eliminación segura**: Primero actualiza la referencia en persona, luego elimina
-- Previene referencias huérfanas
-- Requiere ID de la persona
-
-## Arquitectura
-
-### Estructura en Capas
-
-```
-┌─────────────────────────────────────┐
-│     Main / UI Layer                 │
-│  (Interacción con usuario)          │
-│  AppMenu, MenuHandler, MenuDisplay  │
-└───────────┬─────────────────────────┘
-            │
-┌───────────▼─────────────────────────┐
-│     Service Layer                   │
-│  (Lógica de negocio y validación)   │
-│  PersonaServiceImpl                 │
-│  DomicilioServiceImpl               │
-└───────────┬─────────────────────────┘
-            │
-┌───────────▼─────────────────────────┐
-│     DAO Layer                       │
-│  (Acceso a datos)                   │
-│  PersonaDAO, DomicilioDAO           │
-└───────────┬─────────────────────────┘
-            │
-┌───────────▼─────────────────────────┐
-│     Models Layer                    │
-│  (Entidades de dominio)             │
-│  Persona, Domicilio, Base           │
-└─────────────────────────────────────┘
+-- No aparece en listar (opción 9) porque filtra por eliminado = 0
 ```
 
-### Componentes Principales
+## Validaciones Implementadas
 
-**Config/**
-- `DatabaseConnection.java`: Gestión de conexiones JDBC con validación en inicialización estática
-- `TransactionManager.java`: Manejo de transacciones con AutoCloseable
+### Envío
+- **Tracking único** (no puede haber duplicados)
+- **Costo >= 0** (no puede ser negativo)
+- **Fechas consistentes** (fecha_estimada >= fecha_despacho)
+- **Campos obligatorios** (tracking, empresa, tipo, costo, estado)
 
-**Models/**
-- `Base.java`: Clase abstracta con campos id y eliminado
-- `Persona.java`: Entidad Persona (nombre, apellido, dni, domicilio)
-- `Domicilio.java`: Entidad Domicilio (calle, numero)
+### Pedido
+- **Número único** (no puede haber duplicados)
+- **Total >= 0** (no puede ser negativo)
+- **Campos obligatorios** (numero, fecha, cliente_nombre, total, estado)
+- **Integridad referencial** (envio_id debe existir o ser NULL)
 
-**Dao/**
-- `GenericDAO<T>`: Interface genérica con operaciones CRUD
-- `PersonaDAO`: Implementación con queries LEFT JOIN para incluir domicilio
-- `DomicilioDAO`: Implementación para domicilios
+## Arquitectura y Patrones
 
-**Service/**
-- `GenericService<T>`: Interface genérica para servicios
-- `PersonaServiceImpl`: Validaciones de persona y coordinación con domicilios
-- `DomicilioServiceImpl`: Validaciones de domicilio
-
-**Main/**
-- `Main.java`: Punto de entrada
-- `AppMenu.java`: Orquestador del ciclo de menú
-- `MenuHandler.java`: Implementación de operaciones CRUD con captura de entrada
-- `MenuDisplay.java`: Lógica de visualización de menús
-- `TestConexion.java`: Utilidad para verificar conexión a BD
-
-## Modelo de Datos
-
+### Capas
 ```
-┌────────────────────┐          ┌──────────────────┐
-│     personas       │          │   domicilios     │
-├────────────────────┤          ├──────────────────┤
-│ id (PK)            │          │ id (PK)          │
-│ nombre             │          │ calle            │
-│ apellido           │          │ numero           │
-│ dni (UNIQUE)       │          │ eliminado        │
-│ domicilio_id (FK)  │──────┐   └──────────────────┘
-│ eliminado          │      │
-└────────────────────┘      │
-                            │
-                            └──▶ Relación 0..1
+Main (UI) → Service (Lógica de Negocio) → DAO (Acceso a Datos) → Models (Entidades)
 ```
 
-**Reglas:**
-- Una persona puede tener 0 o 1 domicilio
-- DNI es único (constraint en base de datos y validación en aplicación)
-- Eliminación lógica: campo `eliminado = TRUE`
-- Foreign key `domicilio_id` puede ser NULL
+### Patrones Utilizados
 
-## Patrones y Buenas Prácticas
+- **DAO (Data Access Object):** Separación de lógica de acceso a datos
+- **Service Layer:** Capa de lógica de negocio y validaciones
+- **Transaction Script:** Gestión de transacciones ACID
+- **Soft Delete:** Baja lógica para mantener historial
+- **Generic Types:** Interfaces genéricas para reutilización
 
-### Seguridad
-- **100% PreparedStatements**: Prevención de SQL injection
-- **Validación multi-capa**: Service layer valida antes de persistir
-- **DNI único**: Constraint en BD + validación en `PersonaServiceImpl.validateDniUnique()`
+### Transacciones
+```java
+// Ejemplo de transacción atómica en PedidoServiceImpl
+TransactionManager tm = new TransactionManager(conn);
+tm.startTransaction();
 
-### Gestión de Recursos
-- **Try-with-resources**: Todas las conexiones, statements y resultsets
-- **AutoCloseable**: TransactionManager cierra y hace rollback automático
-- **Scanner cerrado**: En `AppMenu.run()` al finalizar
-
-### Validaciones
-- **Input trimming**: Todos los inputs usan `.trim()` inmediatamente
-- **Campos obligatorios**: Validación de null y empty en service layer
-- **IDs positivos**: Validación `id > 0` en todas las operaciones
-- **Verificación de rowsAffected**: En UPDATE y DELETE
-
-### Soft Delete
-- DELETE ejecuta: `UPDATE tabla SET eliminado = TRUE WHERE id = ?`
-- SELECT filtra: `WHERE eliminado = FALSE`
-- No hay eliminación física de datos
-
-## Reglas de Negocio Principales
-
-1. **DNI único**: No se permiten personas con DNI duplicado
-2. **Campos obligatorios**: Nombre, apellido y DNI son requeridos para persona
-3. **Validación antes de persistir**: Service layer valida antes de llamar a DAO
-4. **Eliminación segura de domicilio**: Usar opción 10 (por persona) en lugar de opción 8 (por ID)
-5. **Preservación de valores**: En actualización, campos vacíos mantienen valor original
-6. **Búsqueda flexible**: LIKE con % permite coincidencias parciales
-7. **Transacciones**: Operaciones complejas soportan rollback
+try {
+    envioService.crear(envio, tm.getConnection());  // 1. Crear envío
+    pedidoDAO.crear(pedido, conn);                  // 2. Crear pedido
+    tm.commit();                                    // 3. Commit si todo OK
+} catch (Exception e) {
+    // Rollback automático en tm.close()
+    throw new SQLException("Error en transacción", e);
+}
+```
 
 ## Solución de Problemas
 
-### Error: "ClassNotFoundException: com.mysql.cj.jdbc.Driver"
-**Causa**: JAR de MySQL no está en classpath
-
-**Solución**: Incluir mysql-connector-j-8.4.0.jar en el comando java -cp
-
-### Error: "Communications link failure"
-**Causa**: MySQL no está ejecutándose
-
-**Solución**:
+### Error: "Driver MySQL no encontrado"
 ```bash
-# Linux/macOS
-sudo systemctl start mysql
-# O
-brew services start mysql
-
-# Windows
-net start MySQL80
+Verificar que mysql-connector-j.jar esté en lib/ y en el classpath
 ```
 
-### Error: "Access denied for user 'root'@'localhost'"
-**Causa**: Credenciales incorrectas
-
-**Solución**: Verificar usuario/contraseña en DatabaseConnection.java o usar -Ddb.user y -Ddb.password
-
-### Error: "Unknown database 'dbtpi3'"
-**Causa**: Base de datos no creada
-
-**Solución**: Ejecutar script de creación de base de datos (ver sección Instalación)
-
-### Error: "Table 'personas' doesn't exist"
-**Causa**: Tablas no creadas
-
-**Solución**: Ejecutar script de creación de tablas (ver sección Instalación)
-
-## Limitaciones Conocidas
-
-1. **No hay tarea gradle run**: Debe ejecutarse con java -cp manualmente o desde IDE
-2. **Interfaz solo consola**: No hay GUI gráfica
-3. **Un domicilio por persona**: No soporta múltiples domicilios
-4. **Sin paginación**: Listar todos puede ser lento con muchos registros
-5. **Opción 8 peligrosa**: Eliminar domicilio por ID puede dejar referencias huérfanas (usar opción 10)
-6. **Sin pool de conexiones**: Nueva conexión por operación (aceptable para app de consola)
-7. **Sin transacciones en MenuHandler**: Actualizar persona + domicilio puede fallar parcialmente
-
-## Documentación Adicional
-
-- **CLAUDE.md**: Documentación técnica detallada para desarrollo
-  - Comandos de build y ejecución
-  - Arquitectura profunda
-  - Patrones de código críticos
-  - Troubleshooting avanzado
-  - Verificación de calidad (score 9.7/10)
-
-- **HISTORIAS_DE_USUARIO.md**: Especificaciones funcionales completas
-  - Historias de usuario detalladas
-  - Reglas de negocio numeradas
-  - Criterios de aceptación en formato Gherkin
-  - Diagramas de flujo
-
-## Tecnologías Utilizadas
-
-- **Lenguaje**: Java 17
-- **Build Tool**: Gradle 8.12
-- **Base de Datos**: MySQL 8.x
-- **JDBC Driver**: mysql-connector-j 8.4.0
-- **Testing**: JUnit 5 (configurado, sin tests implementados)
-
-## Estructura de Directorios
-
-```
-TPI-Prog2-fusion-final/
-├── src/main/java/
-│   ├── Config/          # Configuración de BD y transacciones
-│   ├── Dao/             # Capa de acceso a datos
-│   ├── Main/            # UI y punto de entrada
-│   ├── Models/          # Entidades de dominio
-│   └── Service/         # Lógica de negocio
-├── build.gradle         # Configuración de Gradle
-├── gradlew              # Gradle wrapper (Unix)
-├── gradlew.bat          # Gradle wrapper (Windows)
-├── README.md            # Este archivo
-├── CLAUDE.md            # Documentación técnica
-└── HISTORIAS_DE_USUARIO.md  # Especificaciones funcionales
+### Error: "Access denied for user 'root'"
+```bash
+Verificar credenciales en DatabaseConnection.java
 ```
 
-## Convenciones de Código
+### Error: "Unknown database 'pedido_envio'"
+```bash
+Ejecutar script de esquema en MySQL
+```
 
-- **Idioma**: Español (nombres de clases, métodos, variables)
-- **Nomenclatura**:
-  - Clases: PascalCase (Ej: `PersonaServiceImpl`)
-  - Métodos: camelCase (Ej: `buscarPorDni`)
-  - Constantes SQL: UPPER_SNAKE_CASE (Ej: `SELECT_BY_ID_SQL`)
-- **Indentación**: 4 espacios
-- **Recursos**: Siempre usar try-with-resources
-- **SQL**: Constantes privadas static final
-- **Excepciones**: Capturar y manejar con mensajes al usuario
+### No lista envíos/pedidos pero existen en BD
+```bash
+En MySQL Workbench ejecutar: COMMIT;
+Verificar que eliminado = 0 en los registros
+```
 
-## Evaluación y Criterios de Calidad
+## Testing
 
-### Aspectos Evaluados en el TPI
+Para verificar la conexión antes de usar la app:
+```bash
+java -cp "lib/*:bin" Main.TestConexion
+```
 
-Este proyecto demuestra competencia en los siguientes criterios académicos:
-
-**✅ Arquitectura y Diseño (30%)**
-- Correcta separación en capas con responsabilidades bien definidas
-- Aplicación de patrones de diseño apropiados (DAO, Service Layer, Factory)
-- Uso de interfaces para abstracción y polimorfismo
-- Implementación de herencia con clase abstracta Base
-
-**✅ Persistencia de Datos (25%)**
-- Correcta implementación de operaciones CRUD con JDBC
-- Uso apropiado de PreparedStatements (100% de las consultas)
-- Gestión de transacciones con commit/rollback
-- Manejo de relaciones entre entidades (Foreign Keys, LEFT JOIN)
-- Soft delete implementado correctamente
-
-**✅ Manejo de Recursos y Excepciones (20%)**
-- Try-with-resources en todas las operaciones JDBC
-- Cierre apropiado de conexiones, statements y resultsets
-- Manejo de excepciones con mensajes informativos al usuario
-- Prevención de resource leaks
-
-**✅ Validaciones e Integridad (15%)**
-- Validación de campos obligatorios en múltiples niveles
-- Validación de unicidad de DNI (base de datos + aplicación)
-- Verificación de integridad referencial
-- Prevención de referencias huérfanas mediante eliminación segura
-
-**✅ Calidad de Código (10%)**
-- Código documentado con Javadoc completo (13 archivos)
-- Convenciones de nomenclatura consistentes
-- Código legible y mantenible
-- Ausencia de code smells o antipatrones críticos
-
-**✅ Funcionalidad Completa (10%)**
-- Todas las operaciones CRUD funcionan correctamente
-- Búsquedas y filtros implementados
-- Interfaz de usuario clara y funcional
-- Manejo robusto de errores
-
-### Puntos Destacables del Proyecto
-
-1. **Score de Calidad Verificado**: 9.7/10 mediante análisis exhaustivo de:
-   - Arquitectura y flujo de datos
-   - Manejo de excepciones
-   - Integridad referencial
-   - Validaciones multi-nivel
-   - Gestión de recursos
-   - Consistencia de queries SQL
-
-2. **Documentación Profesional**:
-   - README completo con ejemplos y troubleshooting
-   - CLAUDE.md con arquitectura técnica detallada
-   - HISTORIAS_DE_USUARIO.md con 11 historias y 51 reglas de negocio
-   - Javadoc completo en todos los archivos fuente
-
-3. **Implementaciones Avanzadas**:
-   - Eliminación segura de domicilios (previene FKs huérfanas)
-   - Validación de DNI único en dos niveles (DB + aplicación)
-   - Coordinación transaccional entre servicios
-   - Búsqueda flexible con LIKE pattern matching
-
-4. **Buenas Prácticas Aplicadas**:
-   - Dependency Injection manual
-   - Separación de concerns (AppMenu, MenuHandler, MenuDisplay)
-   - Factory pattern para conexiones
-   - Input sanitization con trim() consistente
-   - Fail-fast validation
-
-### Conceptos de Programación 2 Demostrados
-
-| Concepto | Implementación en el Proyecto |
-|----------|-------------------------------|
-| **Herencia** | Clase abstracta `Base` heredada por `Persona` y `Domicilio` |
-| **Polimorfismo** | Interfaces `GenericDAO<T>` y `GenericService<T>` |
-| **Encapsulamiento** | Atributos privados con getters/setters en todas las entidades |
-| **Abstracción** | Interfaces que definen contratos sin implementación |
-| **JDBC** | Conexión, PreparedStatements, ResultSets, transacciones |
-| **DAO Pattern** | `PersonaDAO`, `DomicilioDAO` abstraen el acceso a datos |
-| **Service Layer** | Lógica de negocio separada en `PersonaServiceImpl`, `DomicilioServiceImpl` |
-| **Exception Handling** | Try-catch en todas las capas, propagación controlada |
-| **Resource Management** | Try-with-resources para AutoCloseable (Connection, Statement, ResultSet) |
-| **Dependency Injection** | Construcción manual de dependencias en `AppMenu.createPersonaService()` |
+Salida esperada:
+```
+Conexión exitosa a la base de datos
+Base de datos: pedido_envio
+Driver: MySQL Connector/J v8.0.33
+```
 
 ## Contexto Académico
 
@@ -580,10 +388,8 @@ Este proyecto representa la integración de todos los conceptos vistos durante e
 - Validar integridad de datos en múltiples niveles
 - Documentar código de forma profesional
 
----
+## Autores
 
-**Versión**: 1.0
-**Java**: 17+
-**MySQL**: 8.x
-**Gradle**: 8.12
-**Proyecto Educativo** - Trabajo Práctico Integrador de Programación 2
+Matías Ezequiel Vazquez
+Patricio Sussini Guanziroli
+Lucas Martín Zárate
