@@ -10,10 +10,12 @@ Aplicación de consola que permite gestionar pedidos y sus envíos asociados, co
 
 **Equipo de Desarrollo:**
 
-- **Matías Ezequiel Vazquez** - Desarrollo de capa DAO y Service Etapa ENVIO
-- **Patricio Sussini Guanziroli** - Desarrollo de DAO y Service Etapa PEDIDO
+- **Matías Ezequiel Vazquez** - Desarrollo de Capas de la Etapa ENVIO
+- **Patricio Sussini Guanziroli** - Desarrollo de Capas de la Etapa PEDIDO
 
-**Distribución de trabajo:** Todos los integrantes contribuyeron equitativamente (~33% cada uno) en el diseño, implementación y documentación del sistema, incluido el diseño y desarrollo de la DB en SQL.
+#### **Trabajo compartido en Capa Main y Aplicativos del Menu**
+
+**Distribución de trabajo:** Los dos integrantes contribuyeron equitativamente (~50% cada uno) en el diseño, implementación y documentación del sistema, incluido el diseño y desarrollo de la DB en SQL.
 
 ## Trabajo Práctico Integrador - Programación 2
 
