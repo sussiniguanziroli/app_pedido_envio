@@ -13,7 +13,7 @@ Aplicación de consola que permite gestionar pedidos y sus envíos asociados, co
 - **Matías Ezequiel Vazquez** - Desarrollo de Capas de la Etapa ENVIO
 - **Patricio Sussini Guanziroli** - Desarrollo de Capas de la Etapa PEDIDO
 
-- **Trabajo compartido en Capa Main y Aplicativos del Menu
+#### **Trabajo compartido en Capa Main y Aplicativos del Menu**
 
 **Distribución de trabajo:** Los dos integrantes contribuyeron equitativamente (~50% cada uno) en el diseño, implementación y documentación del sistema, incluido el diseño y desarrollo de la DB en SQL.
 
