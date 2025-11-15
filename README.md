@@ -6,6 +6,16 @@ Sistema de gestión de pedidos y envíos desarrollado en Java con arquitectura e
 
 Aplicación de consola que permite gestionar pedidos y sus envíos asociados, con soporte para operaciones CRUD completas, soft delete y transacciones atómicas. El sistema mantiene una relación unidireccional Pedido→Envío con integridad referencial.
 
+## 👥 Autores
+
+**Equipo de Desarrollo:**
+
+- **Matías Ezequiel Vazquez** - Desarrollo de capa DAO y Service
+- **Patricio Sussini Guanziroli** - Desarrollo de Models y validaciones
+- **Lucas Martín Zárate** - Desarrollo de capa Main (UI) y testing
+
+**Distribución de trabajo:** Todos los integrantes contribuyeron equitativamente (~33% cada uno) en el diseño, implementación y documentación del sistema.
+
 ## Trabajo Práctico Integrador - Programación 2
 
 ### Descripción del Proyecto
